@@ -10,7 +10,9 @@ import {
 } from "./terminalStateStore";
 
 const THREAD_ID = ThreadId.make("thread-1");
+const SECOND_THREAD_ID = ThreadId.make("thread-2");
 const THREAD_REF = scopeThreadRef("environment-a" as never, THREAD_ID);
+const SECOND_THREAD_REF = scopeThreadRef("environment-a" as never, SECOND_THREAD_ID);
 const OTHER_THREAD_REF = scopeThreadRef("environment-b" as never, THREAD_ID);
 
 function makeTerminalEvent(
@@ -251,6 +253,32 @@ describe("terminalStateStore actions", () => {
       terminalOpen: false,
       previewOpen: true,
       previewUrl: "http://localhost:4173/",
+    });
+  });
+
+  it("keeps preview browser state isolated between threads in the same environment", () => {
+    const store = useTerminalStateStore.getState();
+    store.openPreview(THREAD_REF, "localhost:4173");
+    store.openPreview(SECOND_THREAD_REF, "localhost:3000");
+    store.closePreview(THREAD_REF);
+
+    expect(
+      selectThreadTerminalState(
+        useTerminalStateStore.getState().terminalStateByThreadKey,
+        THREAD_REF,
+      ),
+    ).toMatchObject({
+      previewOpen: false,
+      previewUrl: "http://localhost:4173/",
+    });
+    expect(
+      selectThreadTerminalState(
+        useTerminalStateStore.getState().terminalStateByThreadKey,
+        SECOND_THREAD_REF,
+      ),
+    ).toMatchObject({
+      previewOpen: true,
+      previewUrl: "http://localhost:3000/",
     });
   });
 

@@ -1,6 +1,7 @@
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
+import { isElectron } from "~/env";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { normalizePreviewUrl } from "~/preview-browser";
@@ -24,6 +25,12 @@ const IFRAME_SANDBOX = [
   "allow-scripts",
 ].join(" ");
 
+interface PreviewWebviewElement extends HTMLElement {
+  src: string;
+  reload: () => void;
+  stop?: () => void;
+}
+
 export default function PreviewBrowserPanel({
   url,
   onNavigate,
@@ -33,6 +40,8 @@ export default function PreviewBrowserPanel({
   const [frameNonce, setFrameNonce] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const webviewHostRef = useRef<HTMLDivElement | null>(null);
+  const webviewRef = useRef<PreviewWebviewElement | null>(null);
 
   useEffect(() => {
     setDraftUrl(url);
@@ -52,9 +61,84 @@ export default function PreviewBrowserPanel({
     };
   }, [frameNonce, isLoading, url]);
 
+  useEffect(() => {
+    if (!isElectron) {
+      return;
+    }
+
+    const host = webviewHostRef.current;
+    if (!host) {
+      return;
+    }
+
+    const webview = document.createElement("webview") as PreviewWebviewElement;
+    webview.className = "h-full w-full border-0 bg-background";
+    webview.setAttribute("webpreferences", "contextIsolation=yes,sandbox=yes");
+    host.replaceChildren(webview);
+    webviewRef.current = webview;
+
+    const handleStartLoading = () => {
+      setIsLoading(true);
+    };
+    const handleStopLoading = () => {
+      setIsLoading(false);
+    };
+    const handleFailLoad = (event: Event) => {
+      const failure = event as Event & {
+        errorDescription?: string;
+        isMainFrame?: boolean;
+      };
+      if (failure.isMainFrame === false) {
+        return;
+      }
+      setMessage(failure.errorDescription ?? "Unable to load preview.");
+      setIsLoading(false);
+    };
+    const handleRenderProcessGone = () => {
+      setMessage("Preview crashed. Reload to try again.");
+      setIsLoading(false);
+    };
+
+    webview.addEventListener("did-start-loading", handleStartLoading);
+    webview.addEventListener("did-stop-loading", handleStopLoading);
+    webview.addEventListener("did-fail-load", handleFailLoad);
+    webview.addEventListener("render-process-gone", handleRenderProcessGone);
+
+    return () => {
+      webview.removeEventListener("did-start-loading", handleStartLoading);
+      webview.removeEventListener("did-stop-loading", handleStopLoading);
+      webview.removeEventListener("did-fail-load", handleFailLoad);
+      webview.removeEventListener("render-process-gone", handleRenderProcessGone);
+      webview.stop?.();
+      if (webviewRef.current === webview) {
+        webviewRef.current = null;
+      }
+      host.replaceChildren();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isElectron) {
+      return;
+    }
+
+    const webview = webviewRef.current;
+    if (!webview || webview.src === url) {
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage(null);
+    webview.src = url;
+  }, [url]);
+
   const reloadPreview = () => {
     setIsLoading(true);
     setMessage(null);
+    if (isElectron) {
+      webviewRef.current?.reload();
+      return;
+    }
     setFrameNonce((value) => value + 1);
   };
 
@@ -145,16 +229,20 @@ export default function PreviewBrowserPanel({
             Loading preview…
           </div>
         ) : null}
-        <iframe
-          key={`${url}::${frameNonce}`}
-          title="Preview browser"
-          src={url}
-          className="h-full w-full border-0 bg-background"
-          allow="clipboard-read; clipboard-write; fullscreen"
-          sandbox={IFRAME_SANDBOX}
-          onLoad={() => setIsLoading(false)}
-          onError={() => setIsLoading(false)}
-        />
+        {isElectron ? (
+          <div ref={webviewHostRef} className="h-full w-full bg-background" />
+        ) : (
+          <iframe
+            key={`${url}::${frameNonce}`}
+            title="Preview browser"
+            src={url}
+            className="h-full w-full border-0 bg-background"
+            allow="clipboard-read; clipboard-write; fullscreen"
+            sandbox={IFRAME_SANDBOX}
+            onLoad={() => setIsLoading(false)}
+            onError={() => setIsLoading(false)}
+          />
+        )}
       </div>
     </section>
   );
