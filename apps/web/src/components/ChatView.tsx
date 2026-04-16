@@ -127,6 +127,7 @@ import {
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import PlanSidebar from "./PlanSidebar";
+import PreviewBrowserSidebar from "./PreviewBrowserSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
@@ -143,6 +144,8 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
@@ -711,6 +714,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const storeOpenPreview = useTerminalStateStore((s) => s.openPreview);
+  const storeSetPreviewUrl = useTerminalStateStore((s) => s.setPreviewUrl);
+  const storeClosePreview = useTerminalStateStore((s) => s.closePreview);
 
   const setPrompt = useCallback(
     (nextPrompt: string) => {
@@ -1504,6 +1510,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeThreadId, storeCloseTerminal, terminalState.terminalIds.length],
   );
+  const openPreview = useCallback(
+    (url: string) => {
+      if (!activeThreadId) return;
+      storeOpenPreview(activeThreadId, url);
+    },
+    [activeThreadId, storeOpenPreview],
+  );
+  const setPreviewUrl = useCallback(
+    (url: string) => {
+      if (!activeThreadId) return;
+      storeSetPreviewUrl(activeThreadId, url);
+    },
+    [activeThreadId, storeSetPreviewUrl],
+  );
+  const closePreview = useCallback(() => {
+    if (!activeThreadId) return;
+    storeClosePreview(activeThreadId);
+  }, [activeThreadId, storeClosePreview]);
+  const togglePreviewPanel = useCallback(() => {
+    const previewUrl = terminalState.previewUrl;
+    if (!previewUrl) return;
+    if (terminalState.previewOpen) {
+      closePreview();
+      return;
+    }
+    openPreview(previewUrl);
+  }, [closePreview, openPreview, terminalState.previewOpen, terminalState.previewUrl]);
   const runProjectScript = useCallback(
     async (
       script: ProjectScript,
@@ -3569,6 +3602,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          previewPanelAvailable={terminalState.previewUrl !== null}
+          previewPanelOpen={terminalState.previewOpen}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3576,6 +3611,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
+          onTogglePreviewPanel={togglePreviewPanel}
         />
       </header>
 
@@ -4155,6 +4191,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
             }}
           />
         ) : null}
+
+        {(() => {
+          const previewUrl = terminalState.previewUrl;
+          if (!previewUrl) {
+            return null;
+          }
+          return (
+            <PreviewBrowserSidebar
+              open={terminalState.previewOpen}
+              url={previewUrl}
+              onNavigate={setPreviewUrl}
+            />
+          );
+        })()}
       </div>
       {/* end horizontal flex container */}
 
@@ -4181,6 +4231,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
             onActiveTerminalChange={activateTerminal}
             onCloseTerminal={closeTerminal}
+            onOpenPreview={openPreview}
             onHeightChange={setTerminalHeight}
           />
         );
@@ -4270,11 +4321,14 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  previewPanelAvailable: boolean;
+  previewPanelOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
+  onTogglePreviewPanel: () => void;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -4290,11 +4344,14 @@ const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  previewPanelAvailable,
+  previewPanelOpen,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleDiff,
+  onTogglePreviewPanel,
 }: ChatHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -4337,6 +4394,34 @@ const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={previewPanelAvailable && previewPanelOpen}
+                onPressedChange={onTogglePreviewPanel}
+                aria-label="Toggle preview panel"
+                variant="outline"
+                size="xs"
+                disabled={!previewPanelAvailable}
+              >
+                {previewPanelOpen ? (
+                  <PanelRightCloseIcon className="size-3" />
+                ) : (
+                  <PanelRightOpenIcon className="size-3" />
+                )}
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {!previewPanelAvailable
+              ? "Open a terminal link to show the preview panel"
+              : previewPanelOpen
+                ? "Hide preview panel"
+                : "Show preview panel"}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={

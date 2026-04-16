@@ -2,6 +2,7 @@ import { EDITORS, type EditorId } from "@t3tools/contracts";
 import { isMacPlatform } from "./lib/utils";
 
 export type TerminalLinkKind = "url" | "path";
+export type TerminalUrlOpenTarget = "preview" | "external";
 
 export interface TerminalLinkMatch {
   kind: TerminalLinkKind;
@@ -145,6 +146,10 @@ export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
   const urlMatches = collectMatches(line, "url", URL_PATTERN, []);
   const pathMatches = collectMatches(line, "path", FILE_PATH_PATTERN, urlMatches);
   return [...urlMatches, ...pathMatches].toSorted((a, b) => a.start - b.start);
+}
+
+export function terminalUrlOpenTarget(event: Pick<MouseEvent, "shiftKey">): TerminalUrlOpenTarget {
+  return event.shiftKey ? "external" : "preview";
 }
 
 export function isTerminalLinkActivation(

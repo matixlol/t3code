@@ -1,15 +1,41 @@
 import { ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it } from "vitest";
-
-import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 
+type TerminalStateStoreModule = typeof import("./terminalStateStore");
+
+let selectThreadTerminalState: TerminalStateStoreModule["selectThreadTerminalState"];
+let useTerminalStateStore: TerminalStateStoreModule["useTerminalStateStore"];
+
+function installMemoryLocalStorage(): void {
+  const entries = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      entries.set(key, value);
+    },
+    removeItem: (key: string) => {
+      entries.delete(key);
+    },
+    clear: () => {
+      entries.clear();
+    },
+  };
+
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+}
+
 describe("terminalStateStore actions", () => {
-  beforeEach(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.clear();
-    }
+  beforeEach(async () => {
+    vi.resetModules();
+    installMemoryLocalStorage();
+    const module = await import("./terminalStateStore");
+    selectThreadTerminalState = module.selectThreadTerminalState;
+    useTerminalStateStore = module.useTerminalStateStore;
     useTerminalStateStore.setState({ terminalStateByThreadId: {} });
   });
 
@@ -26,6 +52,8 @@ describe("terminalStateStore actions", () => {
       activeTerminalId: "default",
       terminalGroups: [{ id: "group-default", terminalIds: ["default"] }],
       activeTerminalGroupId: "group-default",
+      previewOpen: false,
+      previewUrl: null,
     });
   });
 
@@ -76,6 +104,51 @@ describe("terminalStateStore actions", () => {
       selectThreadTerminalState(useTerminalStateStore.getState().terminalStateByThreadId, THREAD_ID)
         .runningTerminalIds,
     ).toEqual([]);
+  });
+
+  it("stores preview browser state per thread", () => {
+    const store = useTerminalStateStore.getState();
+    store.openPreview(THREAD_ID, "localhost:4173");
+
+    expect(
+      selectThreadTerminalState(
+        useTerminalStateStore.getState().terminalStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toMatchObject({
+      terminalOpen: false,
+      previewOpen: true,
+      previewUrl: "http://localhost:4173/",
+    });
+  });
+
+  it("keeps preview state available when closing the final terminal session", () => {
+    const store = useTerminalStateStore.getState();
+    store.openPreview(THREAD_ID, "localhost:4173");
+    store.closeTerminal(THREAD_ID, "default");
+
+    expect(
+      selectThreadTerminalState(
+        useTerminalStateStore.getState().terminalStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toMatchObject({
+      terminalOpen: false,
+      previewOpen: true,
+      previewUrl: "http://localhost:4173/",
+    });
+
+    store.closePreview(THREAD_ID);
+    expect(
+      selectThreadTerminalState(
+        useTerminalStateStore.getState().terminalStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toMatchObject({
+      terminalOpen: false,
+      previewOpen: false,
+      previewUrl: "http://localhost:4173/",
+    });
   });
 
   it("resets to default and clears persisted entry when closing the last terminal", () => {

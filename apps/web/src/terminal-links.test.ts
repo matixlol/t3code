@@ -4,6 +4,7 @@ import {
   extractTerminalLinks,
   isTerminalLinkActivation,
   resolvePathLinkTarget,
+  terminalUrlOpenTarget,
 } from "./terminal-links";
 
 describe("extractTerminalLinks", () => {
@@ -59,6 +60,13 @@ describe("resolvePathLinkTarget", () => {
     expect(
       resolvePathLinkTarget("/Users/julius/project/src/main.ts:12", "/Users/julius/project"),
     ).toBe("/Users/julius/project/src/main.ts:12");
+  });
+});
+
+describe("terminalUrlOpenTarget", () => {
+  it("opens previews by default and uses shift-click for the external browser", () => {
+    expect(terminalUrlOpenTarget({ shiftKey: false })).toBe("preview");
+    expect(terminalUrlOpenTarget({ shiftKey: true })).toBe("external");
   });
 });
 

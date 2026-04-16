@@ -17,6 +17,7 @@ import {
   isTerminalLinkActivation,
   preferredTerminalEditor,
   resolvePathLinkTarget,
+  terminalUrlOpenTarget,
 } from "../terminal-links";
 import { isTerminalClearShortcut, terminalNavigationShortcutData } from "../keybindings";
 import {
@@ -113,6 +114,7 @@ interface TerminalViewportProps {
   cwd: string;
   runtimeEnv?: Record<string, string>;
   onSessionExited: () => void;
+  onOpenPreviewUrl: (url: string) => void;
   focusRequestId: number;
   autoFocus: boolean;
   resizeEpoch: number;
@@ -125,6 +127,7 @@ function TerminalViewport({
   cwd,
   runtimeEnv,
   onSessionExited,
+  onOpenPreviewUrl,
   focusRequestId,
   autoFocus,
   resizeEpoch,
@@ -220,12 +223,15 @@ function TerminalViewport({
               end: { x: match.end, y: bufferLineNumber },
             },
             activate: (event: MouseEvent) => {
-              if (!isTerminalLinkActivation(event)) return;
-
               const latestTerminal = terminalRef.current;
               if (!latestTerminal) return;
 
               if (match.kind === "url") {
+                if (terminalUrlOpenTarget(event) === "preview") {
+                  onOpenPreviewUrl(match.text);
+                  return;
+                }
+
                 void api.shell.openExternal(match.text).catch((error) => {
                   writeSystemMessage(
                     latestTerminal,
@@ -234,6 +240,8 @@ function TerminalViewport({
                 });
                 return;
               }
+
+              if (!isTerminalLinkActivation(event)) return;
 
               const target = resolvePathLinkTarget(match.text, cwd);
               void api.shell.openInEditor(target, preferredTerminalEditor()).catch((error) => {
@@ -392,7 +400,7 @@ function TerminalViewport({
     // autoFocus is intentionally omitted;
     // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, runtimeEnv, terminalId, threadId]);
+  }, [cwd, onOpenPreviewUrl, runtimeEnv, terminalId, threadId]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -450,6 +458,7 @@ interface ThreadTerminalDrawerProps {
   closeShortcutLabel?: string | undefined;
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
+  onOpenPreview: (url: string) => void;
   onHeightChange: (height: number) => void;
 }
 
@@ -499,6 +508,7 @@ export default function ThreadTerminalDrawer({
   closeShortcutLabel,
   onActiveTerminalChange,
   onCloseTerminal,
+  onOpenPreview,
   onHeightChange,
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
@@ -806,6 +816,7 @@ export default function ThreadTerminalDrawer({
                         cwd={cwd}
                         {...(runtimeEnv ? { runtimeEnv } : {})}
                         onSessionExited={() => onCloseTerminal(terminalId)}
+                        onOpenPreviewUrl={onOpenPreview}
                         focusRequestId={focusRequestId}
                         autoFocus={terminalId === resolvedActiveTerminalId}
                         resizeEpoch={resizeEpoch}
@@ -824,6 +835,7 @@ export default function ThreadTerminalDrawer({
                   cwd={cwd}
                   {...(runtimeEnv ? { runtimeEnv } : {})}
                   onSessionExited={() => onCloseTerminal(resolvedActiveTerminalId)}
+                  onOpenPreviewUrl={onOpenPreview}
                   focusRequestId={focusRequestId}
                   autoFocus
                   resizeEpoch={resizeEpoch}

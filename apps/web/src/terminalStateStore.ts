@@ -14,6 +14,7 @@ import {
   MAX_THREAD_TERMINAL_COUNT,
   type ThreadTerminalGroup,
 } from "./types";
+import { normalizePreviewUrl } from "./preview-browser";
 
 interface ThreadTerminalState {
   terminalOpen: boolean;
@@ -23,6 +24,8 @@ interface ThreadTerminalState {
   activeTerminalId: string;
   terminalGroups: ThreadTerminalGroup[];
   activeTerminalGroupId: string;
+  previewOpen: boolean;
+  previewUrl: string | null;
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
@@ -141,12 +144,21 @@ function terminalGroupsEqual(left: ThreadTerminalGroup[], right: ThreadTerminalG
   return true;
 }
 
+function normalizePreviewUrlState(previewUrl: string | null | undefined): string | null {
+  if (typeof previewUrl !== "string") {
+    return null;
+  }
+  return normalizePreviewUrl(previewUrl);
+}
+
 function threadTerminalStateEqual(left: ThreadTerminalState, right: ThreadTerminalState): boolean {
   return (
     left.terminalOpen === right.terminalOpen &&
     left.terminalHeight === right.terminalHeight &&
     left.activeTerminalId === right.activeTerminalId &&
     left.activeTerminalGroupId === right.activeTerminalGroupId &&
+    left.previewOpen === right.previewOpen &&
+    left.previewUrl === right.previewUrl &&
     arraysEqual(left.terminalIds, right.terminalIds) &&
     arraysEqual(left.runningTerminalIds, right.runningTerminalIds) &&
     terminalGroupsEqual(left.terminalGroups, right.terminalGroups)
@@ -166,6 +178,8 @@ const DEFAULT_THREAD_TERMINAL_STATE: ThreadTerminalState = Object.freeze({
     },
   ],
   activeTerminalGroupId: fallbackGroupId(DEFAULT_THREAD_TERMINAL_ID),
+  previewOpen: false,
+  previewUrl: null,
 });
 
 function createDefaultThreadTerminalState(): ThreadTerminalState {
@@ -196,6 +210,7 @@ function normalizeThreadTerminalState(state: ThreadTerminalState): ThreadTermina
     : null;
   const activeGroupIdFromTerminal =
     terminalGroups.find((group) => group.terminalIds.includes(activeTerminalId))?.id ?? null;
+  const previewUrl = normalizePreviewUrlState(state.previewUrl);
 
   const normalized: ThreadTerminalState = {
     terminalOpen: state.terminalOpen,
@@ -212,6 +227,8 @@ function normalizeThreadTerminalState(state: ThreadTerminalState): ThreadTermina
       activeGroupIdFromTerminal ??
       terminalGroups[0]?.id ??
       fallbackGroupId(DEFAULT_THREAD_TERMINAL_ID),
+    previewOpen: previewUrl ? state.previewOpen === true : false,
+    previewUrl,
   };
   return threadTerminalStateEqual(state, normalized) ? state : normalized;
 }
@@ -370,7 +387,14 @@ function closeThreadTerminal(state: ThreadTerminalState, terminalId: string): Th
 
   const remainingTerminalIds = normalized.terminalIds.filter((id) => id !== terminalId);
   if (remainingTerminalIds.length === 0) {
-    return createDefaultThreadTerminalState();
+    if (!normalized.previewOpen && normalized.previewUrl === null) {
+      return createDefaultThreadTerminalState();
+    }
+    return normalizeThreadTerminalState({
+      ...createDefaultThreadTerminalState(),
+      previewOpen: normalized.previewOpen,
+      previewUrl: normalized.previewUrl,
+    });
   }
 
   const closedTerminalIndex = normalized.terminalIds.indexOf(terminalId);
@@ -401,6 +425,8 @@ function closeThreadTerminal(state: ThreadTerminalState, terminalId: string): Th
     activeTerminalId: nextActiveTerminalId,
     terminalGroups,
     activeTerminalGroupId: nextActiveTerminalGroupId,
+    previewOpen: normalized.previewOpen,
+    previewUrl: normalized.previewUrl,
   });
 }
 
@@ -426,6 +452,33 @@ function setThreadTerminalActivity(
   return { ...normalized, runningTerminalIds: [...runningTerminalIds] };
 }
 
+function openThreadPreview(state: ThreadTerminalState, rawUrl: string): ThreadTerminalState {
+  const normalized = normalizeThreadTerminalState(state);
+  const previewUrl = normalizePreviewUrl(rawUrl);
+  if (!previewUrl) {
+    return normalized;
+  }
+  if (normalized.previewOpen && normalized.previewUrl === previewUrl) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    previewOpen: true,
+    previewUrl,
+  };
+}
+
+function closeThreadPreview(state: ThreadTerminalState): ThreadTerminalState {
+  const normalized = normalizeThreadTerminalState(state);
+  if (!normalized.previewOpen) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    previewOpen: false,
+  };
+}
+
 export function selectThreadTerminalState(
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>,
   threadId: ThreadId,
@@ -433,7 +486,9 @@ export function selectThreadTerminalState(
   if (threadId.length === 0) {
     return getDefaultThreadTerminalState();
   }
-  return terminalStateByThreadId[threadId] ?? getDefaultThreadTerminalState();
+  return normalizeThreadTerminalState(
+    terminalStateByThreadId[threadId] ?? getDefaultThreadTerminalState(),
+  );
 }
 
 function updateTerminalStateByThreadId(
@@ -478,6 +533,9 @@ interface TerminalStateStoreState {
     terminalId: string,
     hasRunningSubprocess: boolean,
   ) => void;
+  openPreview: (threadId: ThreadId, url: string) => void;
+  setPreviewUrl: (threadId: ThreadId, url: string) => void;
+  closePreview: (threadId: ThreadId) => void;
   clearTerminalState: (threadId: ThreadId) => void;
   removeOrphanedTerminalStates: (activeThreadIds: Set<ThreadId>) => void;
 }
@@ -522,6 +580,11 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
           updateTerminal(threadId, (state) =>
             setThreadTerminalActivity(state, terminalId, hasRunningSubprocess),
           ),
+        openPreview: (threadId, url) =>
+          updateTerminal(threadId, (state) => openThreadPreview(state, url)),
+        setPreviewUrl: (threadId, url) =>
+          updateTerminal(threadId, (state) => openThreadPreview(state, url)),
+        closePreview: (threadId) => updateTerminal(threadId, (state) => closeThreadPreview(state)),
         clearTerminalState: (threadId) =>
           updateTerminal(threadId, () => createDefaultThreadTerminalState()),
         removeOrphanedTerminalStates: (activeThreadIds) =>
