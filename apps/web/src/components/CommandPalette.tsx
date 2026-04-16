@@ -13,6 +13,7 @@ import {
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
+  CopyIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -39,6 +40,7 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useCopyBranchNameToClipboard } from "../hooks/useCopyBranchNameToClipboard";
 import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
 import {
@@ -215,6 +217,7 @@ function OpenCommandPaletteDialog() {
   const settings = useSettings();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
+  const { copyBranchNameToClipboard } = useCopyBranchNameToClipboard();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const keybindings = useServerKeybindings();
@@ -322,6 +325,7 @@ function OpenCommandPaletteDialog() {
   );
 
   const activeThreadId = activeThread?.id;
+  const currentThreadBranch = activeThread?.branch ?? activeDraftThread?.branch ?? null;
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -665,6 +669,22 @@ function OpenCommandPaletteDialog() {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+  }
+
+  if (currentThreadBranch) {
+    actionItems.push({
+      kind: "action",
+      value: "action:copy-branch",
+      searchTerms: ["copy branch", "branch name", "git branch", currentThreadBranch],
+      title: "Copy branch name",
+      description: currentThreadBranch,
+      icon: <CopyIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.copyBranch",
+      run: () => {
+        copyBranchNameToClipboard(currentThreadBranch);
+        return Promise.resolve();
+      },
     });
   }
 

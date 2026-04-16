@@ -95,6 +95,7 @@ const rpcHarness = new BrowserWsRpcHarness();
 const wsRequests = rpcHarness.requests;
 let customWsRpcResolver: ((body: NormalizedWsRpcRequestBody) => unknown | undefined) | null = null;
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
+const clipboardWriteTextMock = vi.fn<(value: string) => Promise<void>>();
 
 interface ViewportSpec {
   name: string;
@@ -1377,6 +1378,21 @@ function dispatchChatNewShortcut(): void {
   );
 }
 
+function dispatchCopyBranchShortcut(): void {
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: ">",
+      code: "Period",
+      shiftKey: true,
+      metaKey: useMetaForMod,
+      ctrlKey: !useMetaForMod,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 async function triggerChatNewShortcutUntilPath(
   router: ReturnType<typeof getRouter>,
   predicate: (pathname: string) => boolean,
@@ -1599,6 +1615,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";
+    clipboardWriteTextMock.mockReset();
+    clipboardWriteTextMock.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWriteTextMock },
+    });
     wsRequests.length = 0;
     customWsRpcResolver = null;
     __resetEnvironmentApiOverridesForTests();
@@ -4110,6 +4132,114 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the command palette.",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows copy branch in the command palette and copies the current thread branch", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-copy-branch-action-test" as MessageId,
+        targetText: "copy branch action test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+            {
+              command: "thread.copyBranch",
+              shortcut: {
+                key: ".",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: false,
+                modKey: true,
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await openCommandPaletteFromTrigger();
+
+      const palette = page.getByTestId("command-palette");
+      await expect
+        .element(palette.getByText("Copy branch name", { exact: true }))
+        .toBeInTheDocument();
+      await expect.element(palette.getByText("main", { exact: true })).toBeInTheDocument();
+      await expect
+        .element(
+          palette.getByText(isMacPlatform(navigator.platform) ? "⇧⌘." : "Ctrl+Shift+.", {
+            exact: true,
+          }),
+        )
+        .toBeInTheDocument();
+
+      await palette.getByText("Copy branch name", { exact: true }).click();
+
+      await vi.waitFor(() => {
+        expect(clipboardWriteTextMock).toHaveBeenCalledWith("main");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("copies the current thread branch from the global shortcut", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-copy-branch-shortcut-test" as MessageId,
+        targetText: "copy branch shortcut test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "thread.copyBranch",
+              shortcut: {
+                key: ".",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: false,
+                modKey: true,
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      dispatchCopyBranchShortcut();
+
+      await vi.waitFor(() => {
+        expect(clipboardWriteTextMock).toHaveBeenCalledWith("main");
+      });
     } finally {
       await mounted.cleanup();
     }

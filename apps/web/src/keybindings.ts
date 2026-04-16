@@ -51,6 +51,7 @@ const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   Digit7: ["7"],
   Digit8: ["8"],
   Digit9: ["9"],
+  Period: ["."],
 };
 
 function normalizeEventKey(key: string): string {

@@ -110,6 +110,7 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
+  { shortcut: modShortcut(".", { shiftKey: true }), command: "thread.copyBranch" },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
@@ -264,6 +265,10 @@ describe("shortcutLabelForCommand", () => {
       "Ctrl+O",
     );
     assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.copyBranch", "MacIntel"),
+      "⇧⌘.",
+    );
+    assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.jump.3", "MacIntel"),
       "⌘3",
     );
@@ -406,6 +411,31 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
       "commandPalette.toggle",
+    );
+  });
+
+  it("matches thread.copyBranch for shifted period shortcuts", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: ">", code: "Period", metaKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "MacIntel",
+          context: { terminalFocus: false },
+        },
+      ),
+      "thread.copyBranch",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: ">", code: "Period", ctrlKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "Linux",
+          context: { terminalFocus: false },
+        },
+      ),
+      "thread.copyBranch",
     );
   });
 

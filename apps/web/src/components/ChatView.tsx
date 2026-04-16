@@ -92,6 +92,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { useCopyBranchNameToClipboard } from "../hooks/useCopyBranchNameToClipboard";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -1409,6 +1410,7 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
+  const { copyBranchNameToClipboard } = useCopyBranchNameToClipboard();
   const availableEditors = useServerAvailableEditors();
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
@@ -2284,6 +2286,15 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.copyBranch") {
+        if (!copyBranchNameToClipboard(activeThreadBranch)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2296,10 +2307,12 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [
     activeProject,
+    activeThreadBranch,
     terminalState.terminalOpen,
     terminalState.activeTerminalId,
     activeThreadId,
     closeTerminal,
+    copyBranchNameToClipboard,
     createNewTerminal,
     setTerminalOpen,
     runProjectScript,
