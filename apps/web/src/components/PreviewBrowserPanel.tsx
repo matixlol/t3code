@@ -42,6 +42,7 @@ export default function PreviewBrowserPanel({
   const [message, setMessage] = useState<string | null>(null);
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<PreviewWebviewElement | null>(null);
+  const webviewDomReadyRef = useRef(false);
 
   useEffect(() => {
     setDraftUrl(url);
@@ -76,7 +77,13 @@ export default function PreviewBrowserPanel({
     webview.setAttribute("webpreferences", "contextIsolation=yes,sandbox=yes");
     host.replaceChildren(webview);
     webviewRef.current = webview;
+    webviewDomReadyRef.current = false;
 
+    const handleDomReady = () => {
+      if (webviewRef.current === webview) {
+        webviewDomReadyRef.current = true;
+      }
+    };
     const handleStartLoading = () => {
       setIsLoading(true);
     };
@@ -99,19 +106,24 @@ export default function PreviewBrowserPanel({
       setIsLoading(false);
     };
 
+    webview.addEventListener("dom-ready", handleDomReady);
     webview.addEventListener("did-start-loading", handleStartLoading);
     webview.addEventListener("did-stop-loading", handleStopLoading);
     webview.addEventListener("did-fail-load", handleFailLoad);
     webview.addEventListener("render-process-gone", handleRenderProcessGone);
 
     return () => {
+      webview.removeEventListener("dom-ready", handleDomReady);
       webview.removeEventListener("did-start-loading", handleStartLoading);
       webview.removeEventListener("did-stop-loading", handleStopLoading);
       webview.removeEventListener("did-fail-load", handleFailLoad);
       webview.removeEventListener("render-process-gone", handleRenderProcessGone);
-      webview.stop?.();
       if (webviewRef.current === webview) {
+        if (webviewDomReadyRef.current) {
+          webview.stop?.();
+        }
         webviewRef.current = null;
+        webviewDomReadyRef.current = false;
       }
       host.replaceChildren();
     };
@@ -136,7 +148,15 @@ export default function PreviewBrowserPanel({
     setIsLoading(true);
     setMessage(null);
     if (isElectron) {
-      webviewRef.current?.reload();
+      const webview = webviewRef.current;
+      if (!webview) {
+        return;
+      }
+      if (webviewDomReadyRef.current) {
+        webview.reload();
+        return;
+      }
+      webview.src = url;
       return;
     }
     setFrameNonce((value) => value + 1);
