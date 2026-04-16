@@ -39,6 +39,24 @@ brew install --cask t3-code
 yay -S t3code-bin
 ```
 
+### Local macOS fork install
+
+If you want this repo installed as a separate local macOS app bundle without changing the desktop branding in source, run:
+
+```bash
+bun run install:desktop:fork:macos
+```
+
+That command builds a macOS zip artifact, patches the outer app bundle plus Electron helper bundle names so the fork launches correctly, ad-hoc signs it, and installs `T3 Code (fork).app` into `/Applications` (or `~/Applications` if `/Applications` is not writable).
+
+To reuse an existing macOS zip artifact instead of rebuilding:
+
+```bash
+bun run install:desktop:fork:macos -- --zip path/to/T3-Code-<version>-<arch>.zip
+```
+
+This is intentionally a post-build patch. It keeps the runtime branding and Application Support behavior from source unless you explicitly change the desktop app code too.
+
 ## Some notes
 
 We are very very early in this project. Expect bugs.

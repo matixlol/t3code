@@ -51,3 +51,18 @@ Docs:
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Local macOS fork app install
+
+If asked to install/package this repo as a separate local macOS app bundle without changing desktop branding in source, prefer:
+
+```bash
+bun run install:desktop:fork:macos
+```
+
+Notes:
+
+- The installer can also reuse an existing zip artifact via `bun run install:desktop:fork:macos -- --zip <path>`.
+- It patches the outer `.app` bundle and the nested Electron helper app bundle/executable names, then ad-hoc signs the result.
+- Renaming only the outer `.app` is not enough; Electron will crash on launch with `Unable to find helper app` unless the helper bundles are renamed too.
+- This keeps the runtime branding and Application Support behavior from source unless the desktop app code is changed separately.
