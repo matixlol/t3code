@@ -1,20 +1,21 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ApprovalRequestId,
+  ProviderKind,
   type OrchestrationEvent,
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import {
   Effect,
   Exit,
+  FileSystem,
   Layer,
   ManagedRuntime,
   Option,
+  Path,
+  Ref,
   Schedule,
   Schema,
   Scope,
@@ -23,7 +24,9 @@ import {
 
 import { CheckpointStoreLive } from "../src/checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../src/checkpointing/Services/CheckpointStore.ts";
+import { GitCoreLive } from "../src/git/Layers/GitCore.ts";
 import { GitCore, type GitCoreShape } from "../src/git/Services/GitCore.ts";
+import { GitStatusBroadcaster } from "../src/git/Services/GitStatusBroadcaster.ts";
 import { TextGeneration, type TextGenerationShape } from "../src/git/Services/TextGeneration.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
@@ -36,15 +39,18 @@ import { ProjectionPendingApprovalRepository } from "../src/persistence/Services
 import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
+import { ServerSettingsService } from "../src/serverSettings.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapterLive } from "../src/provider/Layers/CodexAdapter.ts";
 import { CodexAdapter } from "../src/provider/Services/CodexAdapter.ts";
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
+import { RepositoryIdentityResolverLive } from "../src/project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../src/orchestration/Layers/ProjectionSnapshotQuery.ts";
+import { RuntimeReceiptBusTest } from "../src/orchestration/Layers/RuntimeReceiptBus.ts";
 import { OrchestrationReactorLive } from "../src/orchestration/Layers/OrchestrationReactor.ts";
 import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -54,12 +60,18 @@ import {
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  RuntimeReceiptBus,
+  type OrchestrationRuntimeReceipt,
+} from "../src/orchestration/Services/RuntimeReceiptBus.ts";
 
 import {
   makeTestProviderAdapterHarness,
   type TestProviderAdapterHarness,
 } from "./TestProviderAdapter.integration.ts";
-import { ServerConfig } from "../src/config.ts";
+import { deriveServerPaths, ServerConfig } from "../src/config.ts";
+import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
+import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
@@ -69,14 +81,16 @@ function runGit(cwd: string, args: ReadonlyArray<string>) {
   });
 }
 
-function initializeGitWorkspace(cwd: string) {
+const initializeGitWorkspace = Effect.fn(function* (cwd: string) {
   runGit(cwd, ["init", "--initial-branch=main"]);
   runGit(cwd, ["config", "user.email", "test@example.com"]);
   runGit(cwd, ["config", "user.name", "Test User"]);
-  fs.writeFileSync(path.join(cwd, "README.md"), "v1\n", "utf8");
+  const fileSystem = yield* FileSystem.FileSystem;
+  const { join } = yield* Path.Path;
+  yield* fileSystem.writeFileString(join(cwd, "README.md"), "v1\n");
   runGit(cwd, ["add", "."]);
   runGit(cwd, ["commit", "-m", "Initial"]);
-}
+});
 
 export function gitRefExists(cwd: string, ref: string): boolean {
   try {
@@ -114,7 +128,7 @@ function waitFor<A, E>(
   read: Effect.Effect<A, E>,
   predicate: (value: A) => boolean,
   description: string,
-  timeoutMs = 3000,
+  timeoutMs = 40_000,
 ): Effect.Effect<A, never> {
   const RETRY_SIGNAL = "wait_for_retry";
   const retryIntervalMs = 10;
@@ -185,11 +199,21 @@ export interface OrchestrationIntegrationHarness {
     },
     never
   >;
+  readonly waitForReceipt: {
+    (
+      predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
+      timeoutMs?: number,
+    ): Effect.Effect<OrchestrationRuntimeReceipt, never>;
+    <Receipt extends OrchestrationRuntimeReceipt>(
+      predicate: (receipt: OrchestrationRuntimeReceipt) => receipt is Receipt,
+      timeoutMs?: number,
+    ): Effect.Effect<Receipt, never>;
+  };
   readonly dispose: Effect.Effect<void, never>;
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
-  readonly provider?: "codex";
+  readonly provider?: ProviderKind;
   readonly realCodex?: boolean;
 }
 
@@ -197,7 +221,9 @@ export const makeOrchestrationIntegrationHarness = (
   options?: MakeOrchestrationIntegrationHarnessOptions,
 ) =>
   Effect.gen(function* () {
-    const sleep = (ms: number) => Effect.sleep(ms);
+    const path = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+
     const provider = options?.provider ?? "codex";
     const useRealCodex = options?.realCodex === true;
     const adapterHarness = useRealCodex
@@ -214,13 +240,16 @@ export const makeOrchestrationIntegrationHarness = (
           listProviders: () => Effect.succeed([adapterHarness.provider]),
         } as typeof ProviderAdapterRegistry.Service)
       : null;
-    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
+    const rootDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-orchestration-integration-",
+    });
     const workspaceDir = path.join(rootDir, "workspace");
-    const stateDir = path.join(rootDir, "state");
-    const dbPath = path.join(stateDir, "state.sqlite");
-    fs.mkdirSync(workspaceDir, { recursive: true });
-    fs.mkdirSync(stateDir, { recursive: true });
-    initializeGitWorkspace(workspaceDir);
+    const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(
+      Effect.provideService(Path.Path, path),
+    );
+    yield* fileSystem.makeDirectory(workspaceDir, { recursive: true });
+    yield* fileSystem.makeDirectory(stateDir, { recursive: true });
+    yield* initializeGitWorkspace(workspaceDir);
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -245,7 +274,7 @@ export const makeOrchestrationIntegrationHarness = (
       }),
     ).pipe(
       Layer.provide(makeCodexAdapterLive()),
-      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, stateDir)),
+      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
@@ -261,40 +290,75 @@ export const makeOrchestrationIntegrationHarness = (
           Layer.provide(AnalyticsService.layerTest),
         );
 
+    const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
+    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
     const runtimeServicesLayer = Layer.mergeAll(
-      orchestrationLayer,
-      OrchestrationProjectionSnapshotQueryLive,
+      projectionSnapshotQueryLayer,
+      orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
-      CheckpointStoreLive,
+      checkpointStoreLayer,
       providerLayer,
+      RuntimeReceiptBusTest,
     );
+    const serverSettingsLayer = ServerSettingsService.layerTest();
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(serverSettingsLayer),
     );
     const gitCoreLayer = Layer.succeed(GitCore, {
       renameBranch: (input: Parameters<GitCoreShape["renameBranch"]>[0]) =>
         Effect.succeed({ branch: input.newBranch }),
     } as unknown as GitCoreShape);
     const textGenerationLayer = Layer.succeed(TextGeneration, {
-      generateBranchName: () => Effect.succeed({ branch: null }),
+      generateBranchName: () => Effect.succeed({ branch: "update" }),
+      generateThreadTitle: () => Effect.succeed({ title: "New thread" }),
     } as unknown as TextGenerationShape);
     const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(gitCoreLayer),
       Layer.provideMerge(textGenerationLayer),
+      Layer.provideMerge(serverSettingsLayer),
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(
+        Layer.succeed(GitStatusBroadcaster, {
+          getStatus: () => Effect.die("getStatus should not be called in this test"),
+          refreshLocalStatus: () =>
+            Effect.succeed({
+              isRepo: true,
+              hasOriginRemote: false,
+              isDefaultBranch: true,
+              branch: "main",
+              hasWorkingTreeChanges: false,
+              workingTree: { files: [], insertions: 0, deletions: 0 },
+            }),
+          refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
+          streamStatus: () => Stream.empty,
+        }),
+      ),
+      Layer.provideMerge(
+        WorkspaceEntriesLive.pipe(
+          Layer.provide(WorkspacePathsLive),
+          Layer.provideMerge(gitCoreLayer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Layer.provideMerge(WorkspacePathsLive),
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
     );
-    const layer = orchestrationReactorLayer.pipe(
+    const layer = Layer.empty.pipe(
+      Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(orchestrationReactorLayer),
       Layer.provide(persistenceLayer),
-      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, stateDir)),
+      Layer.provideMerge(RepositoryIdentityResolverLive),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
     );
 
@@ -322,12 +386,19 @@ export const makeOrchestrationIntegrationHarness = (
       "load ProjectionPendingApprovalRepository service",
       () => runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
     ).pipe(Effect.orDie);
+    const runtimeReceiptBus = yield* tryRuntimePromise("load RuntimeReceiptBus service", () =>
+      runtime.runPromise(Effect.service(RuntimeReceiptBus)),
+    ).pipe(Effect.orDie);
 
     const scope = yield* Scope.make("sequential");
     yield* tryRuntimePromise("start OrchestrationReactor", () =>
-      runtime.runPromise(reactor.start.pipe(Scope.provide(scope))),
+      runtime.runPromise(reactor.start().pipe(Scope.provide(scope))),
     ).pipe(Effect.orDie);
-    yield* sleep(10);
+    const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
+    yield* Stream.runForEach(runtimeReceiptBus.streamEventsForTest, (receipt) =>
+      Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
+    ).pipe(Effect.forkIn(scope));
+    yield* Effect.sleep(10);
 
     const waitForThread: OrchestrationIntegrationHarness["waitForThread"] = (
       threadId,
@@ -367,7 +438,7 @@ export const makeOrchestrationIntegrationHarness = (
     ) =>
       waitFor(
         pendingApprovalRepository
-          .getByRequestId({ requestId: ApprovalRequestId.makeUnsafe(requestId) })
+          .getByRequestId({ requestId: ApprovalRequestId.make(requestId) })
           .pipe(
             Effect.map((row) =>
               Option.match(row, {
@@ -398,6 +469,30 @@ export const makeOrchestrationIntegrationHarness = (
         never
       >;
 
+    function waitForReceipt(
+      predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
+      timeoutMs?: number,
+    ): Effect.Effect<OrchestrationRuntimeReceipt, never>;
+    function waitForReceipt<Receipt extends OrchestrationRuntimeReceipt>(
+      predicate: (receipt: OrchestrationRuntimeReceipt) => receipt is Receipt,
+      timeoutMs?: number,
+    ): Effect.Effect<Receipt, never>;
+    function waitForReceipt(
+      predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
+      timeoutMs?: number,
+    ) {
+      const readMatchingReceipt = Ref.get(receiptHistory).pipe(
+        Effect.map((history) => history.find(predicate)),
+      );
+
+      return waitFor(
+        readMatchingReceipt,
+        (receipt): receipt is OrchestrationRuntimeReceipt => receipt !== undefined,
+        "runtime receipt",
+        timeoutMs,
+      );
+    }
+
     let disposed = false;
     const dispose = Effect.gen(function* () {
       if (disposed) {
@@ -420,13 +515,7 @@ export const makeOrchestrationIntegrationHarness = (
         }
       });
 
-      yield* shutdown.pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            fs.rmSync(rootDir, { recursive: true, force: true });
-          }),
-        ),
-      );
+      yield* shutdown;
     });
 
     return {
@@ -443,6 +532,7 @@ export const makeOrchestrationIntegrationHarness = (
       waitForThread,
       waitForDomainEvent,
       waitForPendingApproval,
+      waitForReceipt,
       dispose,
     } satisfies OrchestrationIntegrationHarness;
   });

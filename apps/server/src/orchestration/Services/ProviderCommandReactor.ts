@@ -6,7 +6,7 @@
  *
  * @module ProviderCommandReactor
  */
-import { ServiceMap } from "effect";
+import { Context } from "effect";
 import type { Effect, Scope } from "effect";
 
 /**
@@ -22,13 +22,19 @@ export interface ProviderCommandReactorShape {
    * Filters orchestration domain events to provider-intent types before
    * processing.
    */
-  readonly start: Effect.Effect<void, never, Scope.Scope>;
+  readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+
+  /**
+   * Resolves when the internal processing queue is empty and idle.
+   * Intended for test use to replace timing-sensitive sleeps.
+   */
+  readonly drain: Effect.Effect<void>;
 }
 
 /**
  * ProviderCommandReactor - Service tag for provider command reaction workers.
  */
-export class ProviderCommandReactor extends ServiceMap.Service<
+export class ProviderCommandReactor extends Context.Service<
   ProviderCommandReactor,
   ProviderCommandReactorShape
 >()("t3/orchestration/Services/ProviderCommandReactor") {}

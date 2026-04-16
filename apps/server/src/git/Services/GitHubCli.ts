@@ -5,11 +5,11 @@
  *
  * @module GitHubCli
  */
-import { ServiceMap } from "effect";
+import { Context } from "effect";
 import type { Effect } from "effect";
 
 import type { ProcessRunResult } from "../../processRunner";
-import type { GitHubCliError } from "../Errors.ts";
+import type { GitHubCliError } from "@t3tools/contracts";
 
 export interface GitHubPullRequestSummary {
   readonly number: number;
@@ -47,7 +47,7 @@ export interface GitHubCliShape {
    */
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
-    readonly headBranch: string;
+    readonly headSelector: string;
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 
@@ -73,7 +73,7 @@ export interface GitHubCliShape {
   readonly createPullRequest: (input: {
     readonly cwd: string;
     readonly baseBranch: string;
-    readonly headBranch: string;
+    readonly headSelector: string;
     readonly title: string;
     readonly bodyFile: string;
   }) => Effect.Effect<void, GitHubCliError>;
@@ -98,6 +98,6 @@ export interface GitHubCliShape {
 /**
  * GitHubCli - Service tag for GitHub CLI process execution.
  */
-export class GitHubCli extends ServiceMap.Service<GitHubCli, GitHubCliShape>()(
+export class GitHubCli extends Context.Service<GitHubCli, GitHubCliShape>()(
   "t3/git/Services/GitHubCli",
 ) {}

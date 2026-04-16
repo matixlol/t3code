@@ -4,18 +4,62 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, shell } from "electron";
-import type { MenuItemConstructorOptions } from "electron";
-import * as Effect from "effect/Effect";
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import {
+  app,
+  BrowserWindow,
+  type BrowserWindowConstructorOptions,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  protocol,
+  safeStorage,
+  shell,
+} from "electron";
+import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
+import type {
+  ClientSettings,
+  DesktopTheme,
+  DesktopAppBranding,
+  DesktopServerExposureMode,
+  DesktopServerExposureState,
+  DesktopUpdateChannel,
+  PersistedSavedEnvironmentRecord,
+  DesktopUpdateActionResult,
+  DesktopUpdateCheckResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
-import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
+import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
+import {
+  DEFAULT_DESKTOP_SETTINGS,
+  readDesktopSettings,
+  setDesktopServerExposurePreference,
+  setDesktopUpdateChannelPreference,
+  writeDesktopSettings,
+} from "./desktopSettings";
+import {
+  readClientSettings,
+  readSavedEnvironmentRegistry,
+  readSavedEnvironmentSecret,
+  removeSavedEnvironmentSecret,
+  writeClientSettings,
+  writeSavedEnvironmentRegistry,
+  writeSavedEnvironmentSecret,
+} from "./clientPersistence";
+import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness";
 import { showDesktopConfirmDialog } from "./confirmDialog";
-import { fixPath } from "./fixPath";
+import { resolveDesktopServerExposure } from "./serverExposure";
+import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
+import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels";
+import { ServerListeningDetector } from "./serverListeningDetector";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -29,25 +73,49 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { resolveDesktopAppBranding } from "./appBranding";
 
-fixPath();
+syncShellEnvironment();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
+const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
+const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
-const STATE_DIR =
-  process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
+const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
+const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
+const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
+const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
+const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
+const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-registry";
+const GET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:get-saved-environment-secret";
+const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secret";
+const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
+const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
+const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+const STATE_DIR = Path.join(BASE_DIR, "userdata");
+const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
+const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
+const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_USER_MODEL_ID = "com.t3tools.t3code";
+const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
+  isDevelopment,
+  appVersion: app.getVersion(),
+});
+const APP_DISPLAY_NAME = desktopAppBranding.displayName;
+const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code";
+const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
+const LINUX_WM_CLASS = isDevelopment ? "t3code-dev" : "t3code";
 const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
 const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -56,18 +124,64 @@ const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
+const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
-const DESKTOP_UPDATE_CHANNEL = "latest";
-const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+
+function resolvePickFolderDefaultPath(rawOptions: unknown): string | undefined {
+  if (typeof rawOptions !== "object" || rawOptions === null) {
+    return undefined;
+  }
+
+  const { initialPath } = rawOptions as { initialPath?: unknown };
+  if (typeof initialPath !== "string") {
+    return undefined;
+  }
+
+  const trimmedPath = initialPath.trim();
+  if (trimmedPath.length === 0) {
+    return undefined;
+  }
+
+  if (trimmedPath === "~") {
+    return OS.homedir();
+  }
+
+  if (trimmedPath.startsWith("~/") || trimmedPath.startsWith("~\\")) {
+    return Path.join(OS.homedir(), trimmedPath.slice(2));
+  }
+
+  return Path.resolve(trimmedPath);
+}
+const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
+const DESKTOP_REQUIRED_PORT_PROBE_HOSTS = ["0.0.0.0", "::"] as const;
+const TITLEBAR_HEIGHT = 40;
+const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
+const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
+const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
+
+type WindowTitleBarOptions = Pick<
+  BrowserWindowConstructorOptions,
+  "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition"
+>;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
+type LinuxDesktopNamedApp = Electron.App & {
+  setDesktopName?: (desktopName: string) => void;
+};
 
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
-let backendAuthToken = "";
+let backendBindHost = DESKTOP_LOOPBACK_HOST;
+let backendBootstrapToken = "";
+let backendHttpUrl = "";
 let backendWsUrl = "";
+let backendEndpointUrl: string | null = null;
+let backendAdvertisedHost: string | null = null;
+let backendReadinessAbortController: AbortController | null = null;
+let backendInitialWindowOpenInFlight: Promise<void> | null = null;
+let backendListeningDetector: ServerListeningDetector | null = null;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -76,15 +190,23 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
+let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
+let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
+const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   platform: process.platform,
   processArch: process.arch,
   runningUnderArm64Translation: app.runningUnderARM64Translation === true,
 });
 const initialUpdateState = (): DesktopUpdateState =>
-  createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+  createInitialDesktopUpdateState(
+    app.getVersion(),
+    desktopRuntimeInfo,
+    desktopSettings.updateChannel,
+  );
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -96,6 +218,143 @@ function logScope(scope: string): string {
 
 function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function readPersistedBackendObservabilitySettings(): {
+  readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
+} {
+  try {
+    if (!FS.existsSync(SERVER_SETTINGS_PATH)) {
+      return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
+    }
+    return parsePersistedServerObservabilitySettings(FS.readFileSync(SERVER_SETTINGS_PATH, "utf8"));
+  } catch (error) {
+    console.warn("[desktop] failed to read persisted backend observability settings", error);
+    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
+  }
+}
+
+function resolveConfiguredDesktopBackendPort(rawPort: string | undefined): number | undefined {
+  if (!rawPort) {
+    return undefined;
+  }
+
+  const parsedPort = Number.parseInt(rawPort, 10);
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65_535) {
+    return undefined;
+  }
+
+  return parsedPort;
+}
+
+function resolveDesktopDevServerUrl(): string {
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
+  if (!devServerUrl) {
+    throw new Error("VITE_DEV_SERVER_URL is required in desktop development.");
+  }
+
+  return devServerUrl;
+}
+
+function backendChildEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.T3CODE_PORT;
+  delete env.T3CODE_MODE;
+  delete env.T3CODE_NO_BROWSER;
+  delete env.T3CODE_HOST;
+  delete env.T3CODE_DESKTOP_WS_URL;
+  delete env.T3CODE_DESKTOP_LAN_ACCESS;
+  delete env.T3CODE_DESKTOP_LAN_HOST;
+  return env;
+}
+
+function getDesktopServerExposureState(): DesktopServerExposureState {
+  return {
+    mode: desktopServerExposureMode,
+    endpointUrl: backendEndpointUrl,
+    advertisedHost: backendAdvertisedHost,
+  };
+}
+
+function getDesktopSecretStorage() {
+  return {
+    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    encryptString: (value: string) => safeStorage.encryptString(value),
+    decryptString: (value: Buffer) => safeStorage.decryptString(value),
+  } as const;
+}
+
+function resolveAdvertisedHostOverride(): string | undefined {
+  const override = process.env.T3CODE_DESKTOP_LAN_HOST?.trim();
+  return override && override.length > 0 ? override : undefined;
+}
+
+async function applyDesktopServerExposureMode(
+  mode: DesktopServerExposureMode,
+  options?: { readonly persist?: boolean; readonly rejectIfUnavailable?: boolean },
+): Promise<DesktopServerExposureState> {
+  const advertisedHostOverride = resolveAdvertisedHostOverride();
+  const requestedMode = mode;
+  let exposure = resolveDesktopServerExposure({
+    mode,
+    port: backendPort,
+    networkInterfaces: OS.networkInterfaces(),
+    ...(advertisedHostOverride ? { advertisedHostOverride } : {}),
+  });
+
+  if (requestedMode === "network-accessible" && exposure.endpointUrl === null) {
+    if (options?.rejectIfUnavailable) {
+      throw new Error("No reachable network address is available for this desktop right now.");
+    }
+    exposure = resolveDesktopServerExposure({
+      mode: "local-only",
+      port: backendPort,
+      networkInterfaces: OS.networkInterfaces(),
+      ...(advertisedHostOverride ? { advertisedHostOverride } : {}),
+    });
+  }
+
+  desktopServerExposureMode = exposure.mode;
+  desktopSettings = setDesktopServerExposurePreference(desktopSettings, requestedMode);
+  backendBindHost = exposure.bindHost;
+  backendHttpUrl = exposure.localHttpUrl;
+  backendWsUrl = exposure.localWsUrl;
+  backendEndpointUrl = exposure.endpointUrl;
+  backendAdvertisedHost = exposure.advertisedHost;
+
+  if (options?.persist) {
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+  }
+
+  return getDesktopServerExposureState();
+}
+
+function relaunchDesktopApp(reason: string): void {
+  writeDesktopLogHeader(`desktop relaunch requested reason=${reason}`);
+  setImmediate(() => {
+    isQuitting = true;
+    clearUpdatePollTimer();
+    cancelBackendReadinessWait();
+    void stopBackendAndWaitForExit()
+      .catch((error) => {
+        writeDesktopLogHeader(
+          `desktop relaunch backend shutdown warning message=${formatErrorMessage(error)}`,
+        );
+      })
+      .finally(() => {
+        restoreStdIoCapture?.();
+        if (isDevelopment) {
+          app.exit(75);
+          return;
+        }
+        app.relaunch({
+          execPath: process.execPath,
+          args: process.argv.slice(1),
+        });
+        app.exit(0);
+      });
+  });
 }
 
 function writeDesktopLogHeader(message: string): void {
@@ -135,6 +394,121 @@ function getSafeExternalUrl(rawUrl: unknown): string | null {
   }
 
   return parsedUrl.toString();
+}
+
+function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
+  if (rawTheme === "light" || rawTheme === "dark" || rawTheme === "system") {
+    return rawTheme;
+  }
+
+  return null;
+}
+
+async function waitForBackendHttpReady(
+  baseUrl: string,
+  options?: Parameters<typeof waitForHttpReady>[1],
+): Promise<void> {
+  cancelBackendReadinessWait();
+  const controller = new AbortController();
+  backendReadinessAbortController = controller;
+
+  try {
+    await waitForHttpReady(baseUrl, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    if (backendReadinessAbortController === controller) {
+      backendReadinessAbortController = null;
+    }
+  }
+}
+
+function cancelBackendReadinessWait(): void {
+  backendReadinessAbortController?.abort();
+  backendReadinessAbortController = null;
+}
+
+async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" | "http"> {
+  const httpReadyPromise = waitForBackendHttpReady(baseUrl, {
+    timeoutMs: 60_000,
+  });
+  const listeningPromise = backendListeningDetector?.promise;
+
+  if (!listeningPromise) {
+    await httpReadyPromise;
+    return "http";
+  }
+
+  return await new Promise<"listening" | "http">((resolve, reject) => {
+    let settled = false;
+
+    const settleResolve = (source: "listening" | "http") => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (source === "listening") {
+        cancelBackendReadinessWait();
+      }
+      resolve(source);
+    };
+
+    const settleReject = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+
+    listeningPromise.then(
+      () => settleResolve("listening"),
+      (error) => settleReject(error),
+    );
+    httpReadyPromise.then(
+      () => settleResolve("http"),
+      (error) => {
+        if (settled && isBackendReadinessAborted(error)) {
+          return;
+        }
+        settleReject(error);
+      },
+    );
+  });
+}
+
+function ensureInitialBackendWindowOpen(): void {
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+    return;
+  }
+
+  const nextOpen = waitForBackendWindowReady(backendHttpUrl)
+    .then((source) => {
+      writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
+      if (mainWindow ?? BrowserWindow.getAllWindows()[0]) {
+        return;
+      }
+      mainWindow = createWindow();
+      writeDesktopLogHeader("bootstrap main window created");
+    })
+    .catch((error) => {
+      if (isBackendReadinessAborted(error)) {
+        return;
+      }
+      writeDesktopLogHeader(
+        `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
+      );
+      console.warn("[desktop] backend readiness check timed out during packaged bootstrap", error);
+    })
+    .finally(() => {
+      if (backendInitialWindowOpenInFlight === nextOpen) {
+        backendInitialWindowOpenInFlight = null;
+      }
+    });
+
+  backendInitialWindowOpenInFlight = nextOpen;
 }
 
 function writeDesktopStreamChunk(
@@ -214,17 +588,23 @@ function initializePackagedLogging(): void {
 }
 
 function captureBackendOutput(child: ChildProcess.ChildProcess): void {
-  if (!app.isPackaged || backendLogSink === null) return;
-  const writeChunk = (chunk: unknown): void => {
-    if (!backendLogSink) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
-    backendLogSink.write(buffer);
+  const attachStream = (stream: NodeJS.ReadableStream | null | undefined): void => {
+    stream?.on("data", (chunk: unknown) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
+      backendLogSink?.write(buffer);
+      backendListeningDetector?.push(buffer);
+    });
   };
-  child.stdout?.on("data", writeChunk);
-  child.stderr?.on("data", writeChunk);
+
+  attachStream(child.stdout);
+  attachStream(child.stderr);
 }
 
 initializePackagedLogging();
+
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
+}
 
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
   if (process.platform !== "darwin") return undefined;
@@ -252,10 +632,12 @@ let updatePollTimer: ReturnType<typeof setInterval> | null = null;
 let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
 let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
+let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
+  if (updateInstallInFlight) return "install";
   if (updateDownloadInFlight) return "download";
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
@@ -351,7 +733,7 @@ function resolveAboutCommitHash(): string | null {
 }
 
 function resolveBackendEntry(): string {
-  return Path.join(resolveAppRoot(), "apps/server/dist/index.mjs");
+  return Path.join(resolveAppRoot(), "apps/server/dist/bin.mjs");
 }
 
 function resolveBackendCwd(): string {
@@ -475,10 +857,7 @@ function dispatchMenuAction(action: string): void {
   const send = () => {
     if (targetWindow.isDestroyed()) return;
     targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
-    if (!targetWindow.isVisible()) {
-      targetWindow.show();
-    }
-    targetWindow.focus();
+    revealWindow(targetWindow);
   };
 
   if (targetWindow.webContents.isLoadingMainFrame()) {
@@ -490,12 +869,15 @@ function dispatchMenuAction(action: string): void {
 }
 
 function handleCheckForUpdatesMenuClick(): void {
+  const hasUpdateFeedConfig =
+    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   const disabledReason = getAutoUpdateDisabledReason({
     isDevelopment,
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
     disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    hasUpdateFeedConfig,
   });
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
@@ -512,7 +894,28 @@ function handleCheckForUpdatesMenuClick(): void {
   if (!BrowserWindow.getAllWindows().length) {
     mainWindow = createWindow();
   }
-  void checkForUpdates("menu");
+  void checkForUpdatesFromMenu();
+}
+
+async function checkForUpdatesFromMenu(): Promise<void> {
+  await checkForUpdates("menu");
+
+  if (updateState.status === "up-to-date") {
+    void dialog.showMessageBox({
+      type: "info",
+      title: "You're up to date!",
+      message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "error") {
+    void dialog.showMessageBox({
+      type: "warning",
+      title: "Update check failed",
+      message: "Could not check for updates.",
+      detail: updateState.message ?? "An unknown error occurred. Please try again later.",
+      buttons: ["OK"],
+    });
+  }
 }
 
 function configureApplicationMenu(): void {
@@ -563,7 +966,21 @@ function configureApplicationMenu(): void {
       ],
     },
     { role: "editMenu" },
-    { role: "viewMenu" },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
+        { role: "zoomIn", accelerator: "CmdOrCtrl+Plus", visible: false },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
     { role: "windowMenu" },
     {
       role: "help",
@@ -582,6 +999,7 @@ function configureApplicationMenu(): void {
 function resolveResourcePath(fileName: string): string | null {
   const candidates = [
     Path.join(__dirname, "../resources", fileName),
+    Path.join(__dirname, "../prod-resources", fileName),
     Path.join(process.resourcesPath, "resources", fileName),
     Path.join(process.resourcesPath, fileName),
   ];
@@ -596,6 +1014,18 @@ function resolveResourcePath(fileName: string): string | null {
 }
 
 function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
+  if (isDevelopment && process.platform === "darwin" && ext === "png") {
+    const developmentDockIconPath = Path.join(
+      ROOT_DIR,
+      "assets",
+      "dev",
+      "blueprint-macos-1024.png",
+    );
+    if (FS.existsSync(developmentDockIconPath)) {
+      return developmentDockIconPath;
+    }
+  }
+
   return resolveResourcePath(`icon.${ext}`);
 }
 
@@ -640,6 +1070,10 @@ function configureAppIdentity(): void {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
 
+  if (process.platform === "linux") {
+    (app as LinuxDesktopNamedApp).setDesktopName?.(LINUX_DESKTOP_ENTRY_NAME);
+  }
+
   if (process.platform === "darwin" && app.dock) {
     const iconPath = resolveIconPath("png");
     if (iconPath) {
@@ -659,6 +1093,26 @@ function clearUpdatePollTimer(): void {
   }
 }
 
+function revealWindow(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  if (window.isMinimized()) {
+    window.restore();
+  }
+
+  if (!window.isVisible()) {
+    window.show();
+  }
+
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  }
+
+  window.focus();
+}
+
 function emitUpdateState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -671,7 +1125,29 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   emitUpdateState();
 }
 
+function createBaseUpdateState(
+  channel: DesktopUpdateChannel,
+  enabled: boolean,
+): DesktopUpdateState {
+  return {
+    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo, channel),
+    enabled,
+    status: enabled ? "idle" : "disabled",
+  };
+}
+
+function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): void {
+  autoUpdater.channel = channel;
+  autoUpdater.allowPrerelease = channel === "nightly";
+  autoUpdater.allowDowngrade = channel === "nightly";
+  console.info(
+    `[desktop-updater] Using update channel '${channel}' (allowPrerelease=${channel === "nightly"}, allowDowngrade=${channel === "nightly"}).`,
+  );
+}
+
 function shouldEnableAutoUpdates(): boolean {
+  const hasUpdateFeedConfig =
+    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   return (
     getAutoUpdateDisabledReason({
       isDevelopment,
@@ -679,17 +1155,18 @@ function shouldEnableAutoUpdates(): boolean {
       platform: process.platform,
       appImage: process.env.APPIMAGE,
       disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      hasUpdateFeedConfig,
     }) === null
   );
 }
 
-async function checkForUpdates(reason: string): Promise<void> {
-  if (isQuitting || !updaterConfigured || updateCheckInFlight) return;
+async function checkForUpdates(reason: string): Promise<boolean> {
+  if (isQuitting || !updaterConfigured || updateCheckInFlight) return false;
   if (updateState.status === "downloading" || updateState.status === "downloaded") {
     console.info(
       `[desktop-updater] Skipping update check (${reason}) while status=${updateState.status}.`,
     );
-    return;
+    return false;
   }
   updateCheckInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
@@ -697,12 +1174,14 @@ async function checkForUpdates(reason: string): Promise<void> {
 
   try {
     await autoUpdater.checkForUpdates();
+    return true;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     setUpdateState(
       reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
     );
     console.error(`[desktop-updater] Failed to check for updates: ${message}`);
+    return true;
   } finally {
     updateCheckInFlight = false;
   }
@@ -736,13 +1215,22 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
   }
 
   isQuitting = true;
+  updateInstallInFlight = true;
   clearUpdatePollTimer();
   try {
     await stopBackendAndWaitForExit();
-    autoUpdater.quitAndInstall();
-    return { accepted: true, completed: true };
+    // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.destroy();
+    }
+    // `quitAndInstall()` only starts the handoff to the updater. The actual
+    // install may still fail asynchronously, so keep the action incomplete
+    // until we either quit or receive an updater error.
+    autoUpdater.quitAndInstall(true, true);
+    return { accepted: true, completed: false };
   } catch (error: unknown) {
     const message = formatErrorMessage(error);
+    updateInstallInFlight = false;
     isQuitting = false;
     setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
     console.error(`[desktop-updater] Failed to install update: ${message}`);
@@ -751,17 +1239,6 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 }
 
 function configureAutoUpdater(): void {
-  const enabled = shouldEnableAutoUpdates();
-  setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
-    enabled,
-    status: enabled ? "idle" : "disabled",
-  });
-  if (!enabled) {
-    return;
-  }
-  updaterConfigured = true;
-
   const githubToken =
     process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
   if (githubToken) {
@@ -779,12 +1256,23 @@ function configureAutoUpdater(): void {
     }
   }
 
+  if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
+    autoUpdater.setFeedURL({
+      provider: "generic",
+      url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
+    });
+  }
+
+  const enabled = shouldEnableAutoUpdates();
+  setUpdateState(createBaseUpdateState(desktopSettings.updateChannel, enabled));
+  if (!enabled) {
+    return;
+  }
+  updaterConfigured = true;
+
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  // Keep alpha branding, but force all installs onto the stable update track.
-  autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
-  autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
-  autoUpdater.allowDowngrade = false;
+  applyAutoUpdaterChannel(desktopSettings.updateChannel);
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
   let lastLoggedDownloadMilestone = -1;
 
@@ -798,6 +1286,15 @@ function configureAutoUpdater(): void {
     console.info("[desktop-updater] Looking for updates...");
   });
   autoUpdater.on("update-available", (info) => {
+    if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
+      console.info(
+        `[desktop-updater] Ignoring ${info.version} because it does not match the selected '${updateState.channel}' channel.`,
+      );
+      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+      lastLoggedDownloadMilestone = -1;
+      return;
+    }
+
     setUpdateState(
       reduceDesktopUpdateStateOnUpdateAvailable(
         updateState,
@@ -815,6 +1312,13 @@ function configureAutoUpdater(): void {
   });
   autoUpdater.on("error", (error) => {
     const message = formatErrorMessage(error);
+    if (updateInstallInFlight) {
+      updateInstallInFlight = false;
+      isQuitting = false;
+      setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
+      console.error(`[desktop-updater] Updater error: ${message}`);
+      return;
+    }
     if (!updateCheckInFlight && !updateDownloadInFlight) {
       setUpdateState({
         status: "error",
@@ -859,17 +1363,6 @@ function configureAutoUpdater(): void {
   }, AUTO_UPDATE_POLL_INTERVAL_MS);
   updatePollTimer.unref();
 }
-function backendEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    T3CODE_MODE: "desktop",
-    T3CODE_NO_BROWSER: "1",
-    T3CODE_PORT: String(backendPort),
-    T3CODE_STATE_DIR: STATE_DIR,
-    T3CODE_AUTH_TOKEN: backendAuthToken,
-  };
-}
-
 function scheduleBackendRestart(reason: string): void {
   if (isQuitting || restartTimer) return;
 
@@ -886,23 +1379,52 @@ function scheduleBackendRestart(reason: string): void {
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
 
+  backendObservabilitySettings = readPersistedBackendObservabilitySettings();
   const backendEntry = resolveBackendEntry();
   if (!FS.existsSync(backendEntry)) {
     scheduleBackendRestart(`missing server entry at ${backendEntry}`);
     return;
   }
 
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry], {
+  const captureBackendLogs = !isDevelopment;
+  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
     // Run the child in Node mode so this backend process does not become a GUI app instance.
     env: {
-      ...backendEnv(),
+      ...backendChildEnv(),
       ELECTRON_RUN_AS_NODE: "1",
     },
-    stdio: captureBackendLogs ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: captureBackendLogs
+      ? ["ignore", "pipe", "pipe", "pipe"]
+      : ["ignore", "inherit", "inherit", "pipe"],
   });
+  const bootstrapStream = child.stdio[3];
+  if (bootstrapStream && "write" in bootstrapStream) {
+    bootstrapStream.write(
+      `${JSON.stringify({
+        mode: "desktop",
+        noBrowser: true,
+        port: backendPort,
+        t3Home: BASE_DIR,
+        host: backendBindHost,
+        desktopBootstrapToken: backendBootstrapToken,
+        ...(backendObservabilitySettings.otlpTracesUrl
+          ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
+          : {}),
+        ...(backendObservabilitySettings.otlpMetricsUrl
+          ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
+          : {}),
+      })}\n`,
+    );
+    bootstrapStream.end();
+  } else {
+    child.kill("SIGTERM");
+    scheduleBackendRestart("missing desktop bootstrap pipe");
+    return;
+  }
+  const listeningDetector = new ServerListeningDetector();
+  backendListeningDetector = listeningDetector;
   backendProcess = child;
   let backendSessionClosed = false;
   const closeBackendSession = (details: string) => {
@@ -921,27 +1443,48 @@ function startBackend(): void {
   });
 
   child.on("error", (error) => {
+    if (backendListeningDetector === listeningDetector) {
+      listeningDetector.fail(error);
+      backendListeningDetector = null;
+    }
+    const wasExpected = expectedBackendExitChildren.has(child);
     if (backendProcess === child) {
       backendProcess = null;
     }
     closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
+    if (wasExpected) {
+      return;
+    }
     scheduleBackendRestart(error.message);
   });
 
   child.on("exit", (code, signal) => {
+    if (backendListeningDetector === listeningDetector) {
+      listeningDetector.fail(
+        new Error(
+          `backend exited before logging readiness (code=${code ?? "null"} signal=${signal ?? "null"})`,
+        ),
+      );
+      backendListeningDetector = null;
+    }
+    const wasExpected = expectedBackendExitChildren.has(child);
     if (backendProcess === child) {
       backendProcess = null;
     }
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
     );
-    if (isQuitting) return;
+    if (isQuitting || wasExpected) return;
     const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
     scheduleBackendRestart(reason);
   });
+
+  ensureInitialBackendWindowOpen();
 }
 
 function stopBackend(): void {
+  cancelBackendReadinessWait();
+  backendListeningDetector = null;
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -952,6 +1495,7 @@ function stopBackend(): void {
   if (!child) return;
 
   if (child.exitCode === null && child.signalCode === null) {
+    expectedBackendExitChildren.add(child);
     child.kill("SIGTERM");
     setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
@@ -962,6 +1506,7 @@ function stopBackend(): void {
 }
 
 async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
+  cancelBackendReadinessWait();
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -972,6 +1517,7 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   if (!child) return;
   const backendChild = child;
   if (backendChild.exitCode !== null || backendChild.signalCode !== null) return;
+  expectedBackendExitChildren.add(backendChild);
 
   await new Promise<void>((resolve) => {
     let settled = false;
@@ -1013,16 +1559,134 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.removeAllListeners(GET_APP_BRANDING_CHANNEL);
+  ipcMain.on(GET_APP_BRANDING_CHANNEL, (event) => {
+    event.returnValue = desktopAppBranding;
+  });
+
+  ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
+  ipcMain.on(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
+    event.returnValue = {
+      label: "Local environment",
+      httpBaseUrl: backendHttpUrl || null,
+      wsBaseUrl: backendWsUrl || null,
+      bootstrapToken: backendBootstrapToken || undefined,
+    } as const;
+  });
+
+  ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
+  ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
+
+  ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
+  ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
+    if (typeof rawSettings !== "object" || rawSettings === null) {
+      throw new Error("Invalid client settings payload.");
+    }
+
+    writeClientSettings(CLIENT_SETTINGS_PATH, rawSettings as ClientSettings);
+  });
+
+  ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
+  ipcMain.handle(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async () =>
+    readSavedEnvironmentRegistry(SAVED_ENVIRONMENT_REGISTRY_PATH),
+  );
+
+  ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
+  ipcMain.handle(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async (_event, rawRecords: unknown) => {
+    if (!Array.isArray(rawRecords)) {
+      throw new Error("Invalid saved environment registry payload.");
+    }
+
+    writeSavedEnvironmentRegistry(
+      SAVED_ENVIRONMENT_REGISTRY_PATH,
+      rawRecords as readonly PersistedSavedEnvironmentRecord[],
+    );
+  });
+
+  ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+  ipcMain.handle(
+    GET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+    async (_event, rawEnvironmentId: unknown) => {
+      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+        return null;
+      }
+
+      return readSavedEnvironmentSecret({
+        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
+        environmentId: rawEnvironmentId,
+        secretStorage: getDesktopSecretStorage(),
+      });
+    },
+  );
+
+  ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+  ipcMain.handle(
+    SET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+    async (_event, rawEnvironmentId: unknown, rawSecret: unknown) => {
+      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+        throw new Error("Invalid saved environment id.");
+      }
+      if (typeof rawSecret !== "string" || rawSecret.trim().length === 0) {
+        throw new Error("Invalid saved environment secret.");
+      }
+
+      return writeSavedEnvironmentSecret({
+        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
+        environmentId: rawEnvironmentId,
+        secret: rawSecret,
+        secretStorage: getDesktopSecretStorage(),
+      });
+    },
+  );
+
+  ipcMain.removeHandler(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+  ipcMain.handle(
+    REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+    async (_event, rawEnvironmentId: unknown) => {
+      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+        return;
+      }
+
+      removeSavedEnvironmentSecret({
+        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
+        environmentId: rawEnvironmentId,
+      });
+    },
+  );
+
+  ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
+  ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
+
+  ipcMain.removeHandler(SET_SERVER_EXPOSURE_MODE_CHANNEL);
+  ipcMain.handle(SET_SERVER_EXPOSURE_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+    if (rawMode !== "local-only" && rawMode !== "network-accessible") {
+      throw new Error("Invalid desktop server exposure input.");
+    }
+
+    const nextMode = rawMode as DesktopServerExposureMode;
+    if (nextMode === desktopServerExposureMode) {
+      return getDesktopServerExposureState();
+    }
+
+    const nextState = await applyDesktopServerExposureMode(nextMode, {
+      persist: true,
+      rejectIfUnavailable: true,
+    });
+    relaunchDesktopApp(`serverExposureMode=${nextMode}`);
+    return nextState;
+  });
+
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
-  ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
+  ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const defaultPath = resolvePickFolderDefaultPath(rawOptions);
+    const openDialogOptions: OpenDialogOptions = {
+      properties: ["openDirectory", "createDirectory"],
+      ...(defaultPath ? { defaultPath } : {}),
+    };
     const result = owner
-      ? await dialog.showOpenDialog(owner, {
-          properties: ["openDirectory", "createDirectory"],
-        })
-      : await dialog.showOpenDialog({
-          properties: ["openDirectory", "createDirectory"],
-        });
+      ? await dialog.showOpenDialog(owner, openDialogOptions)
+      : await dialog.showOpenDialog(openDialogOptions);
     if (result.canceled) return null;
     return result.filePaths[0] ?? null;
   });
@@ -1037,6 +1701,16 @@ function registerIpcHandlers(): void {
     return showDesktopConfirmDialog(message, owner);
   });
 
+  ipcMain.removeHandler(SET_THEME_CHANNEL);
+  ipcMain.handle(SET_THEME_CHANNEL, async (_event, rawTheme: unknown) => {
+    const theme = getSafeTheme(rawTheme);
+    if (!theme) {
+      return;
+    }
+
+    nativeTheme.themeSource = theme;
+  });
+
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
   ipcMain.handle(
     CONTEXT_MENU_CHANNEL,
@@ -1047,6 +1721,7 @@ function registerIpcHandlers(): void {
           id: item.id,
           label: item.label,
           destructive: item.destructive === true,
+          disabled: item.disabled === true,
         }));
       if (normalizedItems.length === 0) {
         return null;
@@ -1077,6 +1752,7 @@ function registerIpcHandlers(): void {
           }
           const itemOption: MenuItemConstructorOptions = {
             label: item.label,
+            enabled: !item.disabled,
             click: () => resolve(item.id),
           };
           if (item.destructive) {
@@ -1116,6 +1792,43 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
+  ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
+  ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
+    if (rawChannel !== "latest" && rawChannel !== "nightly") {
+      throw new Error("Invalid desktop update channel input.");
+    }
+    if (updateCheckInFlight || updateDownloadInFlight || updateInstallInFlight) {
+      throw new Error("Cannot change update tracks while an update action is in progress.");
+    }
+
+    const nextChannel = rawChannel as DesktopUpdateChannel;
+
+    desktopSettings = setDesktopUpdateChannelPreference(desktopSettings, nextChannel);
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+
+    if (nextChannel === updateState.channel) {
+      return updateState;
+    }
+
+    const enabled = shouldEnableAutoUpdates();
+    setUpdateState(createBaseUpdateState(nextChannel, enabled));
+
+    if (!enabled || !updaterConfigured) {
+      return updateState;
+    }
+
+    applyAutoUpdaterChannel(nextChannel);
+    const allowDowngrade = autoUpdater.allowDowngrade;
+    // An explicit channel switch should allow the immediate nightly->stable rollback path.
+    autoUpdater.allowDowngrade = true;
+    try {
+      await checkForUpdates("channel-change");
+    } finally {
+      autoUpdater.allowDowngrade = allowDowngrade;
+    }
+    return updateState;
+  });
+
   ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
   ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
     const result = await downloadAvailableUpdate();
@@ -1142,6 +1855,21 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateActionResult;
   });
+
+  ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
+  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+    if (!updaterConfigured) {
+      return {
+        checked: false,
+        state: updateState,
+      } satisfies DesktopUpdateCheckResult;
+    }
+    const checked = await checkForUpdates("web-ui");
+    return {
+      checked,
+      state: updateState,
+    } satisfies DesktopUpdateCheckResult;
+  });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -1151,6 +1879,50 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
+function getInitialWindowBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+}
+
+function getWindowTitleBarOptions(): WindowTitleBarOptions {
+  if (process.platform === "darwin") {
+    return {
+      titleBarStyle: "hiddenInset",
+      trafficLightPosition: { x: 16, y: 18 },
+    };
+  }
+
+  return {
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: TITLEBAR_COLOR,
+      height: TITLEBAR_HEIGHT,
+      symbolColor: nativeTheme.shouldUseDarkColors
+        ? TITLEBAR_DARK_SYMBOL_COLOR
+        : TITLEBAR_LIGHT_SYMBOL_COLOR,
+    },
+  };
+}
+
+function syncWindowAppearance(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  window.setBackgroundColor(getInitialWindowBackgroundColor());
+  const { titleBarOverlay } = getWindowTitleBarOptions();
+  if (typeof titleBarOverlay === "object") {
+    window.setTitleBarOverlay(titleBarOverlay);
+  }
+}
+
+function syncAllWindowAppearance(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    syncWindowAppearance(window);
+  }
+}
+
+nativeTheme.on("updated", syncAllWindowAppearance);
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
@@ -1159,10 +1931,10 @@ function createWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     autoHideMenuBar: true,
+    backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...getWindowTitleBarOptions(),
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1186,6 +1958,22 @@ function createWindow(): BrowserWindow {
       if (params.dictionarySuggestions.length === 0) {
         menuTemplate.push({ label: "No suggestions", enabled: false });
       }
+      menuTemplate.push({ type: "separator" });
+    }
+
+    const externalUrl = getSafeExternalUrl(params.linkURL);
+    if (externalUrl) {
+      menuTemplate.push(
+        { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) },
+        { type: "separator" },
+      );
+    }
+
+    if (params.mediaType === "image") {
+      menuTemplate.push({
+        label: "Copy Image",
+        click: () => window.webContents.copyImageAt(params.x, params.y),
+      });
       menuTemplate.push({ type: "separator" });
     }
 
@@ -1215,15 +2003,23 @@ function createWindow(): BrowserWindow {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
   });
-  window.once("ready-to-show", () => {
-    window.show();
-  });
+
+  let initialRevealScheduled = false;
+  const revealInitialWindow = () => {
+    if (initialRevealScheduled) {
+      return;
+    }
+    initialRevealScheduled = true;
+    revealWindow(window);
+  };
+
+  window.once("ready-to-show", revealInitialWindow);
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    void window.loadURL(resolveDesktopDevServerUrl());
     window.webContents.openDevTools({ mode: "detach" });
   } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
+    void window.loadURL(backendHttpUrl);
   }
 
   window.on("closed", () => {
@@ -1244,29 +2040,79 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
-  backendPort = await Effect.service(NetService).pipe(
-    Effect.flatMap((net) => net.reserveLoopbackPort()),
-    Effect.provide(NetService.layer),
-    Effect.runPromise,
+  const configuredBackendPort = resolveConfiguredDesktopBackendPort(process.env.T3CODE_PORT);
+  if (isDevelopment && configuredBackendPort === undefined) {
+    throw new Error("T3CODE_PORT is required in desktop development.");
+  }
+
+  backendPort =
+    configuredBackendPort ??
+    (await resolveDesktopBackendPort({
+      host: DESKTOP_LOOPBACK_HOST,
+      startPort: DEFAULT_DESKTOP_BACKEND_PORT,
+      requiredHosts: DESKTOP_REQUIRED_PORT_PROBE_HOSTS,
+    }));
+  writeDesktopLogHeader(
+    configuredBackendPort === undefined
+      ? `selected backend port via sequential scan startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`
+      : `using configured backend port port=${backendPort}`,
   );
-  writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
-  backendAuthToken = Crypto.randomBytes(24).toString("hex");
-  backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-  process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
-  writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
+  backendBootstrapToken = Crypto.randomBytes(24).toString("hex");
+  if (desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode) {
+    writeDesktopLogHeader(
+      `bootstrap restoring persisted server exposure mode mode=${desktopSettings.serverExposureMode}`,
+    );
+  }
+  const serverExposureState = await applyDesktopServerExposureMode(
+    desktopSettings.serverExposureMode,
+    {
+      persist: desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode,
+    },
+  );
+  writeDesktopLogHeader(`bootstrap resolved backend endpoint baseUrl=${backendHttpUrl}`);
+  if (serverExposureState.endpointUrl) {
+    writeDesktopLogHeader(
+      `bootstrap enabled network access endpointUrl=${serverExposureState.endpointUrl}`,
+    );
+  } else if (desktopSettings.serverExposureMode === "network-accessible") {
+    writeDesktopLogHeader(
+      "bootstrap fell back to local-only because no advertised network host was available",
+    );
+  }
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
-  mainWindow = createWindow();
-  writeDesktopLogHeader("bootstrap main window created");
+
+  if (isDevelopment) {
+    mainWindow = createWindow();
+    writeDesktopLogHeader("bootstrap main window created");
+    void waitForBackendHttpReady(backendHttpUrl)
+      .then(() => {
+        writeDesktopLogHeader("bootstrap backend ready");
+      })
+      .catch((error) => {
+        if (isBackendReadinessAborted(error)) {
+          return;
+        }
+        writeDesktopLogHeader(
+          `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
+        );
+        console.warn("[desktop] backend readiness check timed out during dev bootstrap", error);
+      });
+    return;
+  }
+
+  ensureInitialBackendWindowOpen();
 }
 
 app.on("before-quit", () => {
   isQuitting = true;
+  updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
+  cancelBackendReadinessWait();
   stopBackend();
   restoreStdIoCapture?.();
 });
@@ -1280,13 +2126,23 @@ app
     registerDesktopProtocol();
     configureAutoUpdater();
     void bootstrap().catch((error) => {
+      if (isBackendReadinessAborted(error) && isQuitting) {
+        return;
+      }
       handleFatalStartupError("bootstrap", error);
     });
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createWindow();
+      const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
+      if (existingWindow) {
+        revealWindow(existingWindow);
+        return;
       }
+      if (isDevelopment) {
+        mainWindow = createWindow();
+        return;
+      }
+      ensureInitialBackendWindowOpen();
     });
   })
   .catch((error) => {
@@ -1294,7 +2150,7 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && !isQuitting) {
     app.quit();
   }
 });
@@ -1305,6 +2161,7 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
     clearUpdatePollTimer();
+    cancelBackendReadinessWait();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();

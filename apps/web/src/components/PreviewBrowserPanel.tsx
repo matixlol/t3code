@@ -1,7 +1,7 @@
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 
-import { readNativeApi } from "~/nativeApi";
+import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { normalizePreviewUrl } from "~/preview-browser";
 import { Button } from "./ui/button";
@@ -75,9 +75,9 @@ export default function PreviewBrowserPanel({
   };
 
   const openInBrowser = async () => {
-    const api = readNativeApi();
+    const api = readLocalApi();
     if (!api) {
-      setMessage("Native API unavailable.");
+      setMessage("Local API unavailable.");
       return;
     }
 

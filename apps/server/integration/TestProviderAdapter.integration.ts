@@ -10,6 +10,7 @@ import {
   ProviderTurnStartResult,
   ThreadId,
   TurnId,
+  ProviderKind,
 } from "@t3tools/contracts";
 import { Effect, Queue, Stream } from "effect";
 
@@ -35,7 +36,7 @@ export interface TestTurnResponse {
 export type FixtureProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex";
+  readonly provider: ProviderKind;
   readonly createdAt: string;
   readonly threadId: string;
   readonly turnId?: string | undefined;
@@ -177,7 +178,7 @@ function normalizeFixtureEvent(rawEvent: Record<string, unknown>): ProviderRunti
 
 export interface TestProviderAdapterHarness {
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
-  readonly provider: "codex";
+  readonly provider: ProviderKind;
   readonly queueTurnResponse: (
     threadId: ThreadId,
     response: TestTurnResponse,
@@ -197,7 +198,7 @@ export interface TestProviderAdapterHarness {
 }
 
 interface MakeTestProviderAdapterHarnessOptions {
-  readonly provider?: "codex";
+  readonly provider?: ProviderKind;
 }
 
 function nowIso(): string {
@@ -205,7 +206,7 @@ function nowIso(): string {
 }
 
 function sessionNotFound(
-  provider: "codex",
+  provider: ProviderKind,
   threadId: ThreadId,
 ): ProviderAdapterSessionNotFoundError {
   return new ProviderAdapterSessionNotFoundError({
@@ -215,7 +216,7 @@ function sessionNotFound(
 }
 
 function missingSessionEffect(
-  provider: "codex",
+  provider: ProviderKind,
   threadId: ThreadId,
 ): Effect.Effect<never, ProviderAdapterError> {
   return Effect.fail(sessionNotFound(provider, threadId));
@@ -288,7 +289,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
         state.turnCount += 1;
         const turnCount = state.turnCount;
-        const turnId = TurnId.makeUnsafe(`turn-${turnCount}`);
+        const turnId = TurnId.make(`turn-${turnCount}`);
 
         const response = state.queuedResponses.shift();
         if (!response) {
@@ -306,7 +307,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
             ...(fixtureEvent as Record<string, unknown>),
             eventId: randomUUID(),
             provider,
-            sessionId: RuntimeSessionId.makeUnsafe(String(input.threadId)),
+            sessionId: RuntimeSessionId.make(String(input.threadId)),
             createdAt: nowIso(),
           };
           rawEvent.threadId = state.snapshot.threadId;
@@ -362,7 +363,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         if (deferredTurnCompletedEvents.length === 0) {
           yield* emit({
             type: "turn.completed",
-            eventId: EventId.makeUnsafe(randomUUID()),
+            eventId: EventId.make(randomUUID()),
             provider,
             createdAt: nowIso(),
             threadId: state.snapshot.threadId,

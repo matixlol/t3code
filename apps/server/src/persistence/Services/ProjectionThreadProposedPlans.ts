@@ -5,7 +5,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "@t3tools/contracts";
-import { Schema, ServiceMap } from "effect";
+import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
@@ -15,6 +15,8 @@ export const ProjectionThreadProposedPlan = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.NullOr(TurnId),
   planMarkdown: TrimmedNonEmptyString,
+  implementedAt: Schema.NullOr(IsoDateTime),
+  implementationThreadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -44,7 +46,7 @@ export interface ProjectionThreadProposedPlanRepositoryShape {
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
-export class ProjectionThreadProposedPlanRepository extends ServiceMap.Service<
+export class ProjectionThreadProposedPlanRepository extends Context.Service<
   ProjectionThreadProposedPlanRepository,
   ProjectionThreadProposedPlanRepositoryShape
 >()(

@@ -1,4 +1,6 @@
 import { memo, useState, useCallback } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
@@ -12,9 +14,9 @@ import {
   PanelRightCloseIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { formatTimestamp } from "../session-logic";
 import type { ActivePlanState } from "../session-logic";
 import type { LatestProposedPlanState } from "../session-logic";
+import { formatTimestamp } from "../timestampFormat";
 import {
   proposedPlanTitle,
   buildProposedPlanMarkdownFilename,
@@ -23,8 +25,9 @@ import {
   stripDisplayedPlanMarkdown,
 } from "../proposedPlan";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
-import { readNativeApi } from "~/nativeApi";
+import { readEnvironmentApi } from "~/environmentApi";
 import { toastManager } from "./ui/toast";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 
 function stepStatusIcon(status: string): React.ReactNode {
   if (status === "completed") {
@@ -51,21 +54,27 @@ function stepStatusIcon(status: string): React.ReactNode {
 interface PlanSidebarProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
+  label?: string;
+  environmentId: EnvironmentId;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
+  timestampFormat: TimestampFormat;
   onClose: () => void;
 }
 
 const PlanSidebar = memo(function PlanSidebar({
   activePlan,
   activeProposedPlan,
+  label = "Plan",
+  environmentId,
   markdownCwd,
   workspaceRoot,
+  timestampFormat,
   onClose,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
@@ -73,10 +82,8 @@ const PlanSidebar = memo(function PlanSidebar({
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
-    void navigator.clipboard.writeText(planMarkdown);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [planMarkdown]);
+    copyToClipboard(planMarkdown);
+  }, [planMarkdown, copyToClipboard]);
 
   const handleDownload = useCallback(() => {
     if (!planMarkdown) return;
@@ -85,7 +92,7 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [planMarkdown]);
 
   const handleSaveToWorkspace = useCallback(() => {
-    const api = readNativeApi();
+    const api = readEnvironmentApi(environmentId);
     if (!api || !workspaceRoot || !planMarkdown) return;
     const filename = buildProposedPlanMarkdownFilename(planMarkdown);
     setIsSavingToWorkspace(true);
@@ -113,7 +120,7 @@ const PlanSidebar = memo(function PlanSidebar({
         () => setIsSavingToWorkspace(false),
         () => setIsSavingToWorkspace(false),
       );
-  }, [planMarkdown, workspaceRoot]);
+  }, [environmentId, planMarkdown, workspaceRoot]);
 
   return (
     <div className="flex h-full w-[340px] shrink-0 flex-col border-l border-border/70 bg-card/50">
@@ -124,11 +131,11 @@ const PlanSidebar = memo(function PlanSidebar({
             variant="secondary"
             className="rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
           >
-            Plan
+            {label}
           </Badge>
           {activePlan ? (
             <span className="text-[11px] text-muted-foreground/60">
-              {formatTimestamp(activePlan.createdAt)}
+              {formatTimestamp(activePlan.createdAt, timestampFormat)}
             </span>
           ) : null}
         </div>
@@ -149,7 +156,7 @@ const PlanSidebar = memo(function PlanSidebar({
               </MenuTrigger>
               <MenuPopup align="end">
                 <MenuItem onClick={handleCopyPlan}>
-                  {copied ? "Copied!" : "Copy to clipboard"}
+                  {isCopied ? "Copied!" : "Copy to clipboard"}
                 </MenuItem>
                 <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
                 <MenuItem
@@ -165,7 +172,7 @@ const PlanSidebar = memo(function PlanSidebar({
             size="icon-xs"
             variant="ghost"
             onClick={onClose}
-            aria-label="Close plan sidebar"
+            aria-label={`Close ${label.toLowerCase()} sidebar`}
             className="text-muted-foreground/50 hover:text-foreground/70"
           >
             <PanelRightCloseIcon className="size-3.5" />
