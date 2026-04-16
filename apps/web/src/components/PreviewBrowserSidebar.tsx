@@ -8,10 +8,9 @@ import {
 
 import PreviewBrowserPanel from "./PreviewBrowserPanel";
 
-const PREVIEW_SIDEBAR_WIDTH_STORAGE_KEY = "chat_preview_sidebar_width";
+const PREVIEW_SIDEBAR_WIDTH_RATIO_STORAGE_KEY = "chat_preview_sidebar_width_ratio";
 const PREVIEW_SIDEBAR_MIN_WIDTH = 24 * 16;
 const PREVIEW_SIDEBAR_DEFAULT_WIDTH = 36 * 16;
-const PREVIEW_SIDEBAR_MAX_WIDTH = 48 * 16;
 const PREVIEW_SIDEBAR_MIN_MAIN_WIDTH = 420;
 
 function maxPreviewSidebarWidth(): number {
@@ -19,27 +18,47 @@ function maxPreviewSidebarWidth(): number {
     return PREVIEW_SIDEBAR_DEFAULT_WIDTH;
   }
 
-  const viewportBasedMax = Math.floor(window.innerWidth * 0.55);
   const remainingWidthMax = window.innerWidth - PREVIEW_SIDEBAR_MIN_MAIN_WIDTH;
-  return Math.max(
-    PREVIEW_SIDEBAR_MIN_WIDTH,
-    Math.min(PREVIEW_SIDEBAR_MAX_WIDTH, viewportBasedMax, remainingWidthMax),
-  );
+  return Math.max(PREVIEW_SIDEBAR_MIN_WIDTH, remainingWidthMax);
 }
 
-function clampPreviewSidebarWidth(width: number): number {
+function clampPreviewSidebarWidth(width: number, maxWidth = maxPreviewSidebarWidth()): number {
   const safeWidth = Number.isFinite(width) ? width : PREVIEW_SIDEBAR_DEFAULT_WIDTH;
-  const maxWidth = maxPreviewSidebarWidth();
   return Math.min(Math.max(Math.round(safeWidth), PREVIEW_SIDEBAR_MIN_WIDTH), maxWidth);
 }
 
-function readStoredPreviewSidebarWidth(): number {
+function clampPreviewSidebarWidthRatio(widthRatio: number): number {
+  const safeRatio = Number.isFinite(widthRatio) ? widthRatio : 1;
+  return Math.min(Math.max(safeRatio, 0), 1);
+}
+
+function widthRatioFromWidth(width: number, maxWidth = maxPreviewSidebarWidth()): number {
+  return clampPreviewSidebarWidthRatio(clampPreviewSidebarWidth(width, maxWidth) / maxWidth);
+}
+
+function widthFromRatio(widthRatio: number, maxWidth = maxPreviewSidebarWidth()): number {
+  return clampPreviewSidebarWidth(maxWidth * clampPreviewSidebarWidthRatio(widthRatio), maxWidth);
+}
+
+function defaultPreviewSidebarWidthRatio(): number {
+  return widthRatioFromWidth(PREVIEW_SIDEBAR_DEFAULT_WIDTH);
+}
+
+function readStoredPreviewSidebarWidth(): { width: number; widthRatio: number } {
   if (typeof window === "undefined") {
-    return PREVIEW_SIDEBAR_DEFAULT_WIDTH;
+    return {
+      width: PREVIEW_SIDEBAR_DEFAULT_WIDTH,
+      widthRatio: defaultPreviewSidebarWidthRatio(),
+    };
   }
 
-  const storedWidth = Number(window.localStorage.getItem(PREVIEW_SIDEBAR_WIDTH_STORAGE_KEY));
-  return clampPreviewSidebarWidth(storedWidth);
+  const storedWidthRatio = Number(
+    window.localStorage.getItem(PREVIEW_SIDEBAR_WIDTH_RATIO_STORAGE_KEY),
+  );
+  const widthRatio = Number.isFinite(storedWidthRatio)
+    ? clampPreviewSidebarWidthRatio(storedWidthRatio)
+    : defaultPreviewSidebarWidthRatio();
+  return { width: widthFromRatio(widthRatio), widthRatio };
 }
 
 interface PreviewBrowserSidebarProps {
@@ -53,8 +72,12 @@ export default function PreviewBrowserSidebar({
   url,
   onNavigate,
 }: PreviewBrowserSidebarProps) {
-  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredPreviewSidebarWidth());
+  const [{ width: initialSidebarWidth, widthRatio: initialSidebarWidthRatio }] = useState(
+    readStoredPreviewSidebarWidth,
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth);
   const sidebarWidthRef = useRef(sidebarWidth);
+  const sidebarWidthRatioRef = useRef(initialSidebarWidthRatio);
   const resizeStateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -66,30 +89,31 @@ export default function PreviewBrowserSidebar({
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
 
-  const persistWidth = useCallback((width: number) => {
+  const persistWidthRatio = useCallback((widthRatio: number) => {
     if (typeof window === "undefined") {
       return;
     }
     window.localStorage.setItem(
-      PREVIEW_SIDEBAR_WIDTH_STORAGE_KEY,
-      String(clampPreviewSidebarWidth(width)),
+      PREVIEW_SIDEBAR_WIDTH_RATIO_STORAGE_KEY,
+      String(clampPreviewSidebarWidthRatio(widthRatio)),
     );
   }, []);
 
   useEffect(() => {
     const onWindowResize = () => {
-      const clampedWidth = clampPreviewSidebarWidth(sidebarWidthRef.current);
-      if (clampedWidth !== sidebarWidthRef.current) {
-        setSidebarWidth(clampedWidth);
+      const nextWidth = widthFromRatio(sidebarWidthRatioRef.current);
+      if (nextWidth !== sidebarWidthRef.current) {
+        sidebarWidthRef.current = nextWidth;
+        setSidebarWidth(nextWidth);
       }
-      persistWidth(clampedWidth);
+      persistWidthRatio(sidebarWidthRatioRef.current);
     };
 
     window.addEventListener("resize", onWindowResize);
     return () => {
       window.removeEventListener("resize", onWindowResize);
     };
-  }, [persistWidth]);
+  }, [persistWidthRatio]);
 
   const handleResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -124,6 +148,7 @@ export default function PreviewBrowserSidebar({
     }
     didResizeDuringDragRef.current = true;
     sidebarWidthRef.current = nextWidth;
+    sidebarWidthRatioRef.current = widthRatioFromWidth(nextWidth);
     setSidebarWidth(nextWidth);
   }, []);
 
@@ -142,9 +167,9 @@ export default function PreviewBrowserSidebar({
       if (!didResizeDuringDragRef.current) {
         return;
       }
-      persistWidth(sidebarWidthRef.current);
+      persistWidthRatio(sidebarWidthRatioRef.current);
     },
-    [persistWidth],
+    [persistWidthRatio],
   );
 
   useEffect(() => {
