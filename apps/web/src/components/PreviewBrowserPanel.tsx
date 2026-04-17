@@ -28,8 +28,12 @@ const IFRAME_SANDBOX = [
 interface PreviewWebviewElement extends HTMLElement {
   src: string;
   reload: () => void;
-  stop?: () => void;
 }
+
+type WebviewNavigationEvent = Event & {
+  isMainFrame?: boolean;
+  url?: string;
+};
 
 export default function PreviewBrowserPanel({
   url,
@@ -43,12 +47,19 @@ export default function PreviewBrowserPanel({
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<PreviewWebviewElement | null>(null);
   const webviewDomReadyRef = useRef(false);
+  const latestUrlRef = useRef(url);
+  const latestOnNavigateRef = useRef(onNavigate);
 
   useEffect(() => {
     setDraftUrl(url);
     setIsLoading(true);
     setMessage(null);
+    latestUrlRef.current = url;
   }, [url]);
+
+  useEffect(() => {
+    latestOnNavigateRef.current = onNavigate;
+  }, [onNavigate]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -105,8 +116,22 @@ export default function PreviewBrowserPanel({
       setMessage("Preview crashed. Reload to try again.");
       setIsLoading(false);
     };
+    const handleNavigate = (event: Event) => {
+      const navigation = event as WebviewNavigationEvent;
+      if (navigation.isMainFrame === false || typeof navigation.url !== "string") {
+        return;
+      }
+      const nextUrl = normalizePreviewUrl(navigation.url);
+      if (!nextUrl || nextUrl === latestUrlRef.current) {
+        return;
+      }
+      latestUrlRef.current = nextUrl;
+      latestOnNavigateRef.current(nextUrl);
+    };
 
     webview.addEventListener("dom-ready", handleDomReady);
+    webview.addEventListener("did-navigate", handleNavigate);
+    webview.addEventListener("did-navigate-in-page", handleNavigate);
     webview.addEventListener("did-start-loading", handleStartLoading);
     webview.addEventListener("did-stop-loading", handleStopLoading);
     webview.addEventListener("did-fail-load", handleFailLoad);
@@ -114,14 +139,13 @@ export default function PreviewBrowserPanel({
 
     return () => {
       webview.removeEventListener("dom-ready", handleDomReady);
+      webview.removeEventListener("did-navigate", handleNavigate);
+      webview.removeEventListener("did-navigate-in-page", handleNavigate);
       webview.removeEventListener("did-start-loading", handleStartLoading);
       webview.removeEventListener("did-stop-loading", handleStopLoading);
       webview.removeEventListener("did-fail-load", handleFailLoad);
       webview.removeEventListener("render-process-gone", handleRenderProcessGone);
       if (webviewRef.current === webview) {
-        if (webviewDomReadyRef.current) {
-          webview.stop?.();
-        }
         webviewRef.current = null;
         webviewDomReadyRef.current = false;
       }

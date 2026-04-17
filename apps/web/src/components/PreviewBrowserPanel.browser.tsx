@@ -1,6 +1,8 @@
 import "../index.css";
 
+import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { render } from "vitest-browser-react";
 
 const { readLocalApiMock } = vi.hoisted(() => ({
@@ -29,6 +31,12 @@ type WebviewDouble = {
   stop: ReturnType<typeof vi.fn>;
   isDomReady: boolean;
 };
+
+function Harness({ initialUrl }: { initialUrl: string }) {
+  const [url, setUrl] = useState(initialUrl);
+
+  return <PreviewBrowserPanel url={url} onNavigate={setUrl} />;
+}
 
 describe("PreviewBrowserPanel", () => {
   let createElementSpy: { mockRestore: () => void };
@@ -81,7 +89,7 @@ describe("PreviewBrowserPanel", () => {
     document.body.innerHTML = "";
   });
 
-  it("skips stop during unmount before dom-ready", async () => {
+  it("does not stop the webview during unmount before dom-ready", async () => {
     const screen = await render(
       <PreviewBrowserPanel url="http://127.0.0.1:3000" onNavigate={vi.fn()} />,
     );
@@ -92,7 +100,7 @@ describe("PreviewBrowserPanel", () => {
     expect(webviews[0]?.stop).not.toHaveBeenCalled();
   });
 
-  it("stops the webview after dom-ready", async () => {
+  it("does not stop the webview during unmount after dom-ready", async () => {
     const screen = await render(
       <PreviewBrowserPanel url="http://127.0.0.1:3000" onNavigate={vi.fn()} />,
     );
@@ -102,6 +110,48 @@ describe("PreviewBrowserPanel", () => {
     webview?.element.dispatchEvent(new Event("dom-ready"));
 
     await expect(screen.unmount()).resolves.toBeUndefined();
-    expect(webview?.stop).toHaveBeenCalledOnce();
+    expect(webview?.stop).not.toHaveBeenCalled();
+  });
+
+  it("reloads the webview only after dom-ready", async () => {
+    const screen = await render(
+      <PreviewBrowserPanel url="http://127.0.0.1:3000" onNavigate={vi.fn()} />,
+    );
+
+    try {
+      const webview = webviews[0];
+      expect(webview).toBeDefined();
+
+      await page.getByRole("button", { name: "Reload preview" }).click();
+      expect(webview?.reload).not.toHaveBeenCalled();
+
+      webview?.element.dispatchEvent(new Event("dom-ready"));
+      await page.getByRole("button", { name: "Reload preview" }).click();
+      expect(webview?.reload).toHaveBeenCalledOnce();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("updates the url bar when the preview navigates", async () => {
+    const screen = await render(<Harness initialUrl="http://127.0.0.1:3000" />);
+
+    try {
+      const webview = webviews[0];
+      expect(webview).toBeDefined();
+
+      webview?.element.dispatchEvent(
+        Object.assign(new Event("did-navigate"), {
+          url: "https://example.com/docs",
+          isMainFrame: true,
+        }),
+      );
+
+      await expect
+        .element(page.getByLabelText("Preview URL"))
+        .toHaveValue("https://example.com/docs");
+    } finally {
+      await screen.unmount();
+    }
   });
 });
