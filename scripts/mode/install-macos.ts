@@ -9,6 +9,7 @@
 // never quarantined, so notarization is not needed on this machine.
 //
 // Usage: node scripts/mode/install-macos.ts [--skip-build] [--identity <name|sha1>] [--no-launch]
+//                                           [--no-publish]
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off - A plain Node script, outside the Effect runtime.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -170,6 +171,16 @@ NodeFS.rmSync(installPath, { recursive: true, force: true });
 run("ditto", [appPath, installPath]);
 NodeFS.rmSync(workDir, { recursive: true, force: true });
 console.log(`Installed ${installPath}`);
+
+// Sprites install the server this build just made, so a new build reaches them on their next
+// update. A failed upload leaves the local install alone.
+if (!flag("--skip-build") && !flag("--no-publish")) {
+  try {
+    run("node", ["scripts/mode/publish-server.ts"]);
+  } catch (error) {
+    console.warn(`Could not publish the server for sprites: ${String(error)}`);
+  }
+}
 
 if (!flag("--no-launch")) {
   // A terminal inside T3 Code or Mode inherits ELECTRON_RUN_AS_NODE, which would start the app as

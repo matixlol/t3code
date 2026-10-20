@@ -251,6 +251,10 @@
       "types": "./src/state/relayDiscovery.ts",
       "default": "./src/state/relayDiscovery.ts"
     },
+    "./state/sprites": {
+      "types": "./src/state/sprites.ts",
+      "default": "./src/state/sprites.ts"
+    },
     "./state/linearIssues": {
       "types": "./src/state/linearIssues.ts",
       "default": "./src/state/linearIssues.ts"

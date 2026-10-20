@@ -45,6 +45,8 @@ import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts
 import * as PullRequestReviewGuides from "./persistence/PullRequestReviewGuides.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
+import * as SpriteHost from "./sprite/SpriteHost.ts";
+import * as SpriteService from "./sprite/SpriteService.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as DelegatedTaskAnalytics from "./telemetry/DelegatedTaskAnalytics.ts";
@@ -756,6 +758,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(PeerLinkRequests.layer),
   // WebSocket subscribers and the MCP tools share one instance, so a link wakes every watcher.
   Layer.provide(ThreadLinearIssues.layer),
+  // Sprites this machine's `sprite` CLI can reach, and, on a sprite, keeping it awake for agents.
+  Layer.provide(Layer.mergeAll(SpriteService.layer, SpriteHost.layer)),
   // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
   Layer.provide(layerPullRequestService),
   // The same activity instance RunExecutionService reports to, by layer memoization.

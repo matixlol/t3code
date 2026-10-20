@@ -242,6 +242,8 @@ import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
+import * as SpriteHost from "./sprite/SpriteHost.ts";
+import * as SpriteService from "./sprite/SpriteService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1274,6 +1276,8 @@ export const layerWsRpc = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
+      const sprites = yield* SpriteService.SpriteService;
+      const spriteHost = yield* SpriteHost.SpriteHost;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
       const deviceHostContext =
@@ -2606,6 +2610,20 @@ export const layerWsRpc = (
         [WS_METHODS.linearIssuesSubscribe]: (input) => linearIssues.changes(input.threadId),
         [WS_METHODS.linearIssuesUnlink]: (input) =>
           linearIssues.unlink(input.threadId, input.identifier),
+        [WS_METHODS.spritesList]: () => sprites.list,
+        [WS_METHODS.spritesAction]: (input) => {
+          switch (input._tag) {
+            case "create":
+              return sprites.create(input.name).pipe(Effect.map((pairing) => ({ pairing })));
+            case "pair":
+              return sprites.pair(input.name).pipe(Effect.map((pairing) => ({ pairing })));
+            case "update":
+              return sprites.update(input.name).pipe(Effect.as({ pairing: null }));
+            case "destroy":
+              return sprites.destroy(input.name).pipe(Effect.as({ pairing: null }));
+          }
+        },
+        [WS_METHODS.spriteUsage]: () => spriteHost.usage,
         [WS_METHODS.pullRequestsThreadComments]: (input) =>
           withPullRequestViewer(input, pullRequests.threadComments(input)),
         [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
@@ -3270,6 +3288,8 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
+    const sprites = yield* SpriteService.SpriteService;
+    const spriteHost = yield* SpriteHost.SpriteHost;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3352,6 +3372,8 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(Layer.succeed(ThreadLinearIssues.ThreadLinearIssues, linearIssues)),
+              Layer.provide(Layer.succeed(SpriteService.SpriteService, sprites)),
+              Layer.provide(Layer.succeed(SpriteHost.SpriteHost, spriteHost)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
