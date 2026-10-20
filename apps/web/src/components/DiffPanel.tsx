@@ -107,6 +107,18 @@ import { observeIntersection } from "~/lib/observeIntersection";
 import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
+import {
+  DiffGuideOutline,
+  DiffGuideSectionText,
+  DiffGuideSummary,
+  DiffGuideViewSwitch,
+} from "./diffGuide/DiffGuideViews";
+import {
+  type DiffGuideGroup,
+  diffGuideGeneratedPaths,
+  orderByDiffGuide,
+} from "./diffGuide/diffGuideOrder";
+import { useDiffGuide, useDiffGuideView } from "./diffGuide/useDiffGuide";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { projectCommitUrl } from "@t3tools/client-runtime/change-request-links";
 import { useOpenLink } from "../browser/useOpenLink";
@@ -239,6 +251,7 @@ export default function DiffPanel({
     Schema.Boolean,
   );
   const [hideTestFiles, setHideTestFiles] = useHideTestFiles();
+  const [diffView, setDiffView] = useDiffGuideView();
   const [baseRefQuery, setBaseRefQuery] = useState("");
   // The open commit menu keeps the list it opened with, so rows do not move under the pointer.
   const [openCommitMenu, setOpenCommitMenu] = useState<ReviewBranchCommitsResult | null>(null);
@@ -501,6 +514,36 @@ export default function DiffPanel({
     selectedPatch.trim().length === 0 &&
     !preview?.incomplete &&
     (!selectedGitSource?.patchesDeferred || selectedGitSource.files?.length === 0);
+  const guideEnvironmentId = activeThread?.environmentId ?? null;
+  const guideTarget = toolCallSelection
+    ? null
+    : selectedTurn
+      ? activeThreadId !== null && selectedCheckpointRange !== null
+        ? ({ _tag: "Checkpoint", threadId: activeThreadId, ...selectedCheckpointRange } as const)
+        : null
+      : activeCwd
+        ? ({
+            _tag: "Review",
+            cwd: activeCwd,
+            sourceKind:
+              selectedGitScope === "unstaged"
+                ? "working-tree"
+                : selectedGitScope === "commit"
+                  ? "commit"
+                  : "branch-range",
+            baseRef: selectedBaseRef || null,
+            ...(selectedCommitSha !== null ? { commitSha: selectedCommitSha } : {}),
+            // A working tree changes under the reader; a new diff is a new request. Unchanged
+            // diffs are answered from the server's cache, so this never spends a model request.
+            ...(selectedGitSource?.diffHash ? { diffHash: selectedGitSource.diffHash } : {}),
+          } as const)
+        : null;
+  const guideMode = diffView === "guide" && guideTarget !== null;
+  const guide = useDiffGuide({
+    environmentId: guideEnvironmentId,
+    target: guideTarget,
+    open: guideMode && hasResolvedPatch && !hasNoNetChanges,
+  });
   const lazySource =
     isGitSelection &&
     (selectedGitSource?.truncated || selectedGitSource?.patchesDeferred) &&
@@ -658,9 +701,19 @@ export default function DiffPanel({
   };
   const shownFileEntries = renderableFileEntries.filter(({ fileDiff }) => isFileShown(fileDiff));
   const shownFileKeys = shownFileEntries.map((file) => file.fileKey);
-  const defaultCollapsedDiffFileKeys = settings.diffFilesCollapsed
-    ? new Set(diffFileKeys)
-    : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+  // A guide is read top to bottom, so its files start open, except the generated ones.
+  const guideGeneratedPaths = diffGuideGeneratedPaths(guideMode ? guide.guide : null);
+  const defaultCollapsedDiffFileKeys = guideMode
+    ? guideGeneratedPaths.size === 0
+      ? EMPTY_COLLAPSED_DIFF_FILE_KEYS
+      : new Set(
+          renderableFileEntries
+            .filter(({ fileDiff }) => guideGeneratedPaths.has(resolveFileDiffPath(fileDiff)))
+            .map((file) => file.fileKey),
+        )
+    : settings.diffFilesCollapsed
+      ? new Set(diffFileKeys)
+      : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
   const storedCollapsedDiffFileKeys = useDiffPanelSessionStore((state) =>
     collapseScopeKey ? state.collapsedFileKeysByScopeKey[collapseScopeKey] : undefined,
   );
@@ -677,7 +730,13 @@ export default function DiffPanel({
     remainingFileCount > 0 ? (
       <DiffFileLoadingBoundary load={loadNextFiles} count={remainingFileCount} />
     ) : null;
-  const codeViewFiles = shownFileEntries.map(({ fileDiff, fileKey, fileVersion }) => ({
+  const codeViewFiles = (
+    guideMode
+      ? orderByDiffGuide(shownFileEntries, guide.guide, (entry) =>
+          resolveFileDiffPath(entry.fileDiff),
+        )
+      : shownFileEntries
+  ).map(({ fileDiff, fileKey, fileVersion }) => ({
     fileDiff,
     filePath: resolveFileDiffPath(fileDiff),
     fileKey,
@@ -707,6 +766,23 @@ export default function DiffPanel({
     codeViewReveal.request(file.fileKey);
     return true;
   };
+  const guideLayout =
+    guideMode && guideEnvironmentId !== null
+      ? {
+          guide: guide.guide,
+          renderSection: (group: DiffGuideGroup<{ fileDiff: FileDiffMetadata }>) => (
+            <DiffGuideSectionText
+              number={group.number}
+              total={guide.guide?.sections.length ?? 0}
+              section={group.section}
+              paths={group.items.map((item) => resolveFileDiffPath(item.fileDiff))}
+              environmentId={guideEnvironmentId}
+              cwd={activeCwd ?? ""}
+              onSelectFile={revealDiffFile}
+            />
+          ),
+        }
+      : undefined;
 
   // A file another view asked to reveal (a chat diff link): retried as the diff loads until it
   // holds the file, then not again until a new request, so it does not undo what the user did since.
@@ -1172,6 +1248,9 @@ export default function DiffPanel({
             </TooltipPopup>
           </Tooltip>
         )}
+        {diffFileKeys.length > 0 && guideTarget !== null && (
+          <DiffGuideViewSwitch view={diffView} onViewChange={setDiffView} />
+        )}
         <ToggleGroup
           aria-label="Diff layout"
           className="shrink-0"
@@ -1391,7 +1470,8 @@ export default function DiffPanel({
                         node instanceof HTMLElement && node.hasAttribute("data-title"),
                     );
                     const filePath = title?.textContent;
-                    if (filePath) {
+                    // A guide section row's title names no file.
+                    if (filePath && codeViewFiles.some((file) => file.filePath === filePath)) {
                       openDiffFile(filePath);
                       return;
                     }
@@ -1436,6 +1516,18 @@ export default function DiffPanel({
                     files={codeViewFiles}
                     pendingFiles={pendingFiles}
                     renderCodeViewFooter={renderLoadingBoundary}
+                    {...(guideMode && guideEnvironmentId !== null
+                      ? {
+                          renderCodeViewHeader: () => (
+                            <DiffGuideSummary
+                              state={guide}
+                              environmentId={guideEnvironmentId}
+                              cwd={activeCwd ?? ""}
+                            />
+                          ),
+                        }
+                      : {})}
+                    {...(guideLayout ? { guide: guideLayout } : {})}
                     sectionId={reviewSectionId}
                     sectionTitle={reviewSectionTitle}
                     composerDraftTarget={composerDraftTarget}
@@ -1497,7 +1589,16 @@ export default function DiffPanel({
                     }}
                   />
                 </div>
-                {fileTreeOpen ? (
+                {guideMode && fileTreeOpen ? (
+                  <FileExplorerPane
+                    resizable
+                    storageKey="t3code:diff-file-tree-width"
+                    defaultWidthFraction={0.4}
+                    resizeLabel="Resize guide outline"
+                  >
+                    <DiffGuideOutline state={guide} onSelectFile={revealDiffFile} />
+                  </FileExplorerPane>
+                ) : fileTreeOpen ? (
                   <FileExplorerPane
                     resizable
                     storageKey="t3code:diff-file-tree-width"

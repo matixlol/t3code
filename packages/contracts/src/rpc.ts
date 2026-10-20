@@ -187,6 +187,13 @@ import {
   SpritesListResult,
 } from "./sprite.ts";
 import {
+  DiffGuideError,
+  DiffGuideGenerateInput,
+  DiffGuideGenerateResult,
+  DiffGuideSetApiKeyInput,
+  DiffGuideStatus,
+} from "./diffGuide.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestChangeBreakdown,
@@ -594,6 +601,9 @@ export const WS_METHODS = {
   spritesList: "sprites.list",
   spritesAction: "sprites.action",
   spriteUsage: "sprite.usage",
+  diffGuideGenerate: "diffGuide.generate",
+  diffGuideStatus: "diffGuide.status",
+  diffGuideSetApiKey: "diffGuide.setApiKey",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
   pullRequestsFilesViewed: "pullRequests.filesViewed",
@@ -1171,6 +1181,23 @@ const WsSpritesActionRpc = Rpc.make(WS_METHODS.spritesAction, {
 const WsSpriteUsageRpc = Rpc.make(WS_METHODS.spriteUsage, {
   payload: Schema.Struct({}),
   success: SpriteUsage,
+});
+
+const WsDiffGuideGenerateRpc = Rpc.make(WS_METHODS.diffGuideGenerate, {
+  payload: DiffGuideGenerateInput,
+  success: DiffGuideGenerateResult,
+  error: DiffGuideError,
+});
+
+const WsDiffGuideStatusRpc = Rpc.make(WS_METHODS.diffGuideStatus, {
+  payload: Schema.Struct({}),
+  success: DiffGuideStatus,
+});
+
+const WsDiffGuideSetApiKeyRpc = Rpc.make(WS_METHODS.diffGuideSetApiKey, {
+  payload: DiffGuideSetApiKeyInput,
+  success: DiffGuideStatus,
+  error: DiffGuideError,
 });
 
 const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadComments, {
@@ -2207,6 +2234,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSpritesListRpc,
   WsSpritesActionRpc,
   WsSpriteUsageRpc,
+  WsDiffGuideGenerateRpc,
+  WsDiffGuideStatusRpc,
+  WsDiffGuideSetApiKeyRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
   WsPullRequestsFilesViewedRpc,

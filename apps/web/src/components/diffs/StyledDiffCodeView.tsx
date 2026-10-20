@@ -214,6 +214,19 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 }
 `;
 
+/** The geometry the app's stylesheet gives a file, for every viewer that lays files out. */
+export const DIFF_VIEW_ITEM_METRICS = {
+  diffHeaderHeight: 32,
+  hunkSeparatorHeight: 24,
+  // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds an 8px header
+  // gap.
+  spacing: 0,
+  paddingTop: 0,
+  // Include Pierre's 8px --diffs-gap-fallback in metrics or each expanded file loses a scrollable
+  // row.
+  paddingBottom: 8,
+};
+
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<
   NonNullable<CodeViewProps<LAnnotation, undefined>["options"]>,
   "unsafeCSS" | "itemMetrics" | "layout"
@@ -250,17 +263,7 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
           unsafeCSS: unsafeCSSExtra
             ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
             : DIFF_VIEW_UNSAFE_CSS,
-          itemMetrics: {
-            diffHeaderHeight: 32,
-            hunkSeparatorHeight: 24,
-            // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds an 8px header
-            // gap.
-            spacing: 0,
-            paddingTop: 0,
-            // Include Pierre's 8px --diffs-gap-fallback in metrics or each expanded file loses a scrollable
-            // row.
-            paddingBottom: 8,
-          },
+          itemMetrics: DIFF_VIEW_ITEM_METRICS,
           layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
         }}
       />

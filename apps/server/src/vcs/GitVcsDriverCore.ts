@@ -3439,7 +3439,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
-    input: ReviewDiffPreviewInput,
+    input: ReviewDiffPreviewInput & { readonly contextLines?: number },
   ) {
     const pathArgs = input.file
       ? [input.file.path, ...(input.file.previousPath ? [input.file.previousPath] : [])].map(
@@ -3545,6 +3545,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ...REVIEW_DIFF_ARGS,
       "--minimal",
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+      ...(input.contextLines === undefined ? [] : [`--unified=${input.contextLines}`]),
     ];
     const readStats = Effect.fn("GitVcsDriver.getReviewDiffPreview.stat")(function* (
       ref: string,

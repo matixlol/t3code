@@ -53,7 +53,7 @@ export class CheckpointDiffQuery extends Context.Service<
   CheckpointDiffQuery,
   {
     readonly getTurnDiff: (
-      input: OrchestrationGetTurnDiffInput,
+      input: OrchestrationGetTurnDiffInput & { readonly contextLines?: number },
     ) => Effect.Effect<OrchestrationGetTurnDiffResultType, CheckpointServiceError>;
 
     readonly getFullThreadDiff: (
@@ -208,6 +208,7 @@ export const make = Effect.gen(function* () {
         toCheckpointRef: toCheckpoint.ref,
         fallbackFromToHead: false,
         ignoreWhitespace,
+        ...(input.contextLines === undefined ? {} : { contextLines: input.contextLines }),
       };
       const authoredPaths = yield* checkpointStore
         .listAuthoredPaths(comparison)
