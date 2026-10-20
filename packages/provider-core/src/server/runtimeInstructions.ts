@@ -3,6 +3,10 @@ export const PULL_REQUEST_LINKING_INSTRUCTIONS = `<pull_request_linking>
 Link each PR you create, take over, or push to: link_pull_request, or link_pull_requests for several, full URL, every stack layer, as your next call. Host tools do not link for you. If linking fails, say so. Skip PRs you only read or review, and PRs named only as background. Call watch_pull_request when asked to monitor or babysit, or when work you were asked to do, such as a merge, still waits on checks or reviews, even after an earlier unwatch. Finish any needed branch update and push first, then watch and end your turn. Otherwise act now or hand back. Delegated children never watch, even if the brief says babysit. After PR work, a child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>. Links and watches persist across pushes. For PR waits, no sleep, loops, gh --watch, Monitor or ScheduleWakeup. Before handback, call unwatch_pull_request on any PR you watch.
 </pull_request_linking>`;
 
+const LINEAR_ISSUE_LINKING_INSTRUCTIONS = `<linear_issue_linking>
+When the t3-code MCP server exposes link_linear_issue, use it to register the Linear issue this thread works on: one the user named or linked, or one you created or looked up for this work. Call it with the issue's URL and title as soon as you know them. Do not link issues mentioned only as background.
+</linear_issue_linking>`;
+
 /** Omit model and effort when the harness manages them dynamically. */
 export function buildRuntimeInstructions(runtime: {
   readonly harness: string;
@@ -22,8 +26,8 @@ export function buildRuntimeInstructions(runtime: {
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
   const runtimeInfo = `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio in your response using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>`;
   return runtime.pullRequestLinking === false
-    ? runtimeInfo
-    : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
+    ? `${runtimeInfo}\n\n${LINEAR_ISSUE_LINKING_INSTRUCTIONS}`
+    : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${LINEAR_ISSUE_LINKING_INSTRUCTIONS}`;
 }
 
 function toSingleLine(value: string): string {

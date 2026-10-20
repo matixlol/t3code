@@ -19,8 +19,13 @@ stable ("Beta") release. Fork changes are kept small and in separate commits so 
   Requests are routed to zero-data-retention providers only (`provider.zdr`).
   Toggle it with the sparkles button in any diff toolbar. The OpenRouter key is entered in the guide
   pane (stored in `~/.t3/userdata/secrets`) or read from `OPENROUTER_API_KEY`.
+- **Linear issues** (`apps/server/src/linear`, `apps/web/src/components/linear`): agents link the
+  Linear issue a thread works on with the `link_linear_issue` MCP tool (URL and title, no Linear auth),
+  and it shows beside the thread's pull requests. Stored in `mode_thread_linear_issues`, a table the
+  server creates itself in the shared database; T3 Code never reads it.
 - **No database migrations.** Never add one in the fork: upstream's next migration would reuse the id
-  and be skipped silently. Diff guides cache on disk under `~/.t3/caches/diff-guides` instead.
+  and be skipped silently. Diff guides cache on disk under `~/.t3/caches/diff-guides` instead, and Mode-only
+  tables are created with `CREATE TABLE IF NOT EXISTS` under a `mode_` prefix.
 
 ## Rebasing onto a new upstream release
 

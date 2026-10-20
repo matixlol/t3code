@@ -41,6 +41,7 @@ import { vcsEnvironment } from "../state/vcs";
 import { cn } from "../lib/utils";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./chat/threadDetailsPanelStyles";
 import { ThreadDetailsPrRows } from "./chat/ThreadDetailsPrRows";
+import { ThreadDetailsLinearIssueRows, ThreadLinearIssuesBadge } from "./linear/ThreadLinearIssues";
 import { parsePullRequestReference } from "@t3tools/client-runtime/pull-request-link-input";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
@@ -704,6 +705,9 @@ export function BranchToolbarBranchSelector({
             }}
           />
         ) : null}
+        {displayMode !== "panel" ? (
+          <ThreadLinearIssuesBadge threadRef={threadRef} render={<ComposerControl size="xs" />} />
+        ) : null}
         <span
           className="flex min-w-0"
           onMouseDownCapture={(event) => {
@@ -753,6 +757,7 @@ export function BranchToolbarBranchSelector({
             onActed={() => branchStatusQuery.refresh()}
           />
         ) : null}
+        {displayMode === "panel" ? <ThreadDetailsLinearIssueRows threadRef={threadRef} /> : null}
       </div>
     </BranchPicker>
   );
