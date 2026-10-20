@@ -219,6 +219,10 @@
       "types": "./src/state/diffGuide.ts",
       "default": "./src/state/diffGuide.ts"
     },
+    "./state/linearIssues": {
+      "types": "./src/state/linearIssues.ts",
+      "default": "./src/state/linearIssues.ts"
+    },
     "./state/review": {
       "types": "./src/state/review.ts",
       "default": "./src/state/review.ts"

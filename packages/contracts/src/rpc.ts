@@ -170,6 +170,12 @@ import {
   DiffGuideStatus,
 } from "./diffGuide.ts";
 import {
+  ThreadLinearIssue,
+  ThreadLinearIssueError,
+  ThreadLinearIssueUnlinkInput,
+  ThreadLinearIssuesInput,
+} from "./linearIssue.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestCommentInput,
@@ -551,6 +557,8 @@ export const WS_METHODS = {
   diffGuideGenerate: "diffGuide.generate",
   diffGuideStatus: "diffGuide.status",
   diffGuideSetApiKey: "diffGuide.setApiKey",
+  linearIssuesSubscribe: "linearIssues.subscribe",
+  linearIssuesUnlink: "linearIssues.unlink",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
   pullRequestsFilesViewed: "pullRequests.filesViewed",
@@ -1064,6 +1072,20 @@ const WsDiffGuideSetApiKeyRpc = Rpc.make(WS_METHODS.diffGuideSetApiKey, {
   payload: DiffGuideSetApiKeyInput,
   success: DiffGuideStatus,
   error: DiffGuideError,
+});
+
+// A thread's linked Linear issues, sent whole on subscribe and again whenever they change.
+const WsLinearIssuesSubscribeRpc = Rpc.make(WS_METHODS.linearIssuesSubscribe, {
+  payload: ThreadLinearIssuesInput,
+  success: Schema.Array(ThreadLinearIssue),
+  error: ThreadLinearIssueError,
+  stream: true,
+});
+
+const WsLinearIssuesUnlinkRpc = Rpc.make(WS_METHODS.linearIssuesUnlink, {
+  payload: ThreadLinearIssueUnlinkInput,
+  success: Schema.Struct({ wasLinked: Schema.Boolean }),
+  error: ThreadLinearIssueError,
 });
 
 const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadComments, {
@@ -1984,6 +2006,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsDiffGuideGenerateRpc,
   WsDiffGuideStatusRpc,
   WsDiffGuideSetApiKeyRpc,
+  WsLinearIssuesSubscribeRpc,
+  WsLinearIssuesUnlinkRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
   WsPullRequestsFilesViewedRpc,

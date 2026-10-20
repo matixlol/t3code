@@ -112,6 +112,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.diffGuideGenerate]: "diff-guide",
   [WS_METHODS.diffGuideStatus]: "diff-guide",
   [WS_METHODS.diffGuideSetApiKey]: "diff-guide",
+  [WS_METHODS.linearIssuesSubscribe]: "linear-issues",
+  [WS_METHODS.linearIssuesUnlink]: "linear-issues",
   [WS_METHODS.pullRequestsThreadComments]: "pull-requests",
   [WS_METHODS.pullRequestsDiffFileContents]: "pull-requests",
   [WS_METHODS.pullRequestsFilesViewed]: "pull-requests",

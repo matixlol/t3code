@@ -230,6 +230,7 @@ import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as DiffGuideService from "./diffGuide/DiffGuideService.ts";
+import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1245,6 +1246,7 @@ const layerWsRpc = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const diffGuides = yield* DiffGuideService.DiffGuideService;
+      const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
       const deviceHostContext =
@@ -2524,6 +2526,9 @@ const layerWsRpc = (
         [WS_METHODS.diffGuideGenerate]: (input) => diffGuides.generate(input),
         [WS_METHODS.diffGuideStatus]: () => diffGuides.status,
         [WS_METHODS.diffGuideSetApiKey]: (input) => diffGuides.setApiKey(input.apiKey),
+        [WS_METHODS.linearIssuesSubscribe]: (input) => linearIssues.changes(input.threadId),
+        [WS_METHODS.linearIssuesUnlink]: (input) =>
+          linearIssues.unlink(input.threadId, input.identifier),
         [WS_METHODS.pullRequestsThreadComments]: (input) =>
           withPullRequestViewer(input, pullRequests.threadComments(input)),
         [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
@@ -3174,6 +3179,7 @@ export const layer = Layer.unwrap(
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const diffGuides = yield* DiffGuideService.DiffGuideService;
+    const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3249,6 +3255,7 @@ export const layer = Layer.unwrap(
                 ),
               ),
               Layer.provide(Layer.succeed(DiffGuideService.DiffGuideService, diffGuides)),
+              Layer.provide(Layer.succeed(ThreadLinearIssues.ThreadLinearIssues, linearIssues)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

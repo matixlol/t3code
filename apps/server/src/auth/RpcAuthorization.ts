@@ -136,6 +136,8 @@ export const RPC_REQUIRED_SCOPES = {
   // Generating spends the environment's OpenRouter credit, so it needs more than read access.
   [WS_METHODS.diffGuideGenerate]: AuthOrchestrationOperateScope,
   [WS_METHODS.diffGuideStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.linearIssuesSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.linearIssuesUnlink]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsThreadComments]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsDiffFileContents]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsFilesViewed]: AuthOrchestrationReadScope,

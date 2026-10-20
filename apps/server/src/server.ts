@@ -43,6 +43,7 @@ import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts
 import * as PullRequestReviewGuides from "./persistence/PullRequestReviewGuides.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as DiffGuideService from "./diffGuide/DiffGuideService.ts";
+import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor.ts";
@@ -735,6 +736,8 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   // Diff guides read pull request diffs through the same service, so it comes after them too.
   Layer.provide(DiffGuideService.layer),
+  // WebSocket subscribers and the MCP tools share one instance, so a link wakes every watcher.
+  Layer.provide(ThreadLinearIssues.layer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP. Provided
   // after the guide service so it reaches that too.
