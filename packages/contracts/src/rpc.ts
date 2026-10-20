@@ -163,6 +163,13 @@ import {
 import { ProviderInstanceId, ProviderInstanceMutation } from "./providerInstance.ts";
 import { PullRequestReviewGuideResult } from "./pullRequestReviewGuide.ts";
 import {
+  DiffGuideError,
+  DiffGuideGenerateInput,
+  DiffGuideGenerateResult,
+  DiffGuideSetApiKeyInput,
+  DiffGuideStatus,
+} from "./diffGuide.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestCommentInput,
@@ -541,6 +548,9 @@ export const WS_METHODS = {
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsReviewGuide: "pullRequests.reviewGuide",
   pullRequestsGenerateReviewGuide: "pullRequests.generateReviewGuide",
+  diffGuideGenerate: "diffGuide.generate",
+  diffGuideStatus: "diffGuide.status",
+  diffGuideSetApiKey: "diffGuide.setApiKey",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
   pullRequestsFilesViewed: "pullRequests.filesViewed",
@@ -1037,6 +1047,23 @@ const WsPullRequestsGenerateReviewGuideRpc = Rpc.make(WS_METHODS.pullRequestsGen
   payload: PullRequestRef,
   success: PullRequestReviewGuideResult,
   error: PullRequestRpcError,
+});
+
+const WsDiffGuideGenerateRpc = Rpc.make(WS_METHODS.diffGuideGenerate, {
+  payload: DiffGuideGenerateInput,
+  success: DiffGuideGenerateResult,
+  error: DiffGuideError,
+});
+
+const WsDiffGuideStatusRpc = Rpc.make(WS_METHODS.diffGuideStatus, {
+  payload: Schema.Struct({}),
+  success: DiffGuideStatus,
+});
+
+const WsDiffGuideSetApiKeyRpc = Rpc.make(WS_METHODS.diffGuideSetApiKey, {
+  payload: DiffGuideSetApiKeyInput,
+  success: DiffGuideStatus,
+  error: DiffGuideError,
 });
 
 const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadComments, {
@@ -1954,6 +1981,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsActivityRpc,
   WsPullRequestsReviewGuideRpc,
   WsPullRequestsGenerateReviewGuideRpc,
+  WsDiffGuideGenerateRpc,
+  WsDiffGuideStatusRpc,
+  WsDiffGuideSetApiKeyRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
   WsPullRequestsFilesViewedRpc,

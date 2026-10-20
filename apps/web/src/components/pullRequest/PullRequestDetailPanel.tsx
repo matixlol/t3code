@@ -61,7 +61,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import * as Schema from "effect/Schema";
 
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
@@ -193,7 +195,10 @@ import { guideRunKey, useGuideRunStore } from "./guide/guideRunStore";
 import { useReviewGuideWriter } from "./guide/useReviewGuideWriter";
 import { useInlineActionConfirm } from "./useInlineActionConfirm";
 
-type DetailTab = "summary" | "guide" | "timeline" | "code";
+type DetailTab = "summary" | "guide" | "timeline" | "diffGuide" | "code";
+const DetailTabSchema = Schema.Literals(["summary", "guide", "timeline", "diffGuide", "code"]);
+// The tab the reader last picked, kept per device so every pull request opens on it.
+const DETAIL_TAB_STORAGE_KEY = "mode:pull-request:tab";
 
 /** Said as the thing that did not happen, rather than as the operation that returned an error. */
 const ACTION_FAILURE_LABELS: Record<PullRequestAction, string> = {
@@ -247,8 +252,11 @@ const UPDATE_BRANCH_REBASE_FAILURE_HINT =
 
 const TABS: ReadonlyArray<{ value: DetailTab; label: string }> = [
   { value: "summary", label: "Summary" },
-  { value: "guide", label: "Guide" },
+  // Upstream's agent-written tour, a beta behind Settings → Source Control.
+  { value: "guide", label: "Tour" },
   { value: "timeline", label: "Timeline" },
+  // The diff in the order a fast model's guide reads it, sectioned like Linear's.
+  { value: "diffGuide", label: "Guide" },
   { value: "code", label: "Code" },
 ];
 
@@ -509,7 +517,16 @@ export function PullRequestDetailPanel({
   const [threadPickerOpen, setThreadPickerOpen] = useState(false);
   // Counted up by the guide's last stop to open the composer on the review.
   const [openReviewRequest, setOpenReviewRequest] = useState(0);
-  const [tab, setTab] = useState<DetailTab>("summary");
+  const [preferredTab, setPreferredTab] = useLocalStorage<DetailTab, DetailTab>(
+    DETAIL_TAB_STORAGE_KEY,
+    "summary",
+    DetailTabSchema,
+  );
+  const [tab, setTab] = useState<DetailTab>(preferredTab);
+  const pickTab = (next: DetailTab) => {
+    setTab(next);
+    setPreferredTab(next);
+  };
   const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">("newest");
   const [codeCommitScope, setCodeCommitScope] = useState<{
     readonly pullRequestKey: string;
@@ -581,6 +598,9 @@ export function PullRequestDetailPanel({
       },
       code: (node: HTMLDivElement | null) => {
         scrollerByTab.current.code = node;
+      },
+      diffGuide: (node: HTMLDivElement | null) => {
+        scrollerByTab.current.diffGuide = node;
       },
     }),
     [],
@@ -1571,7 +1591,9 @@ export function PullRequestDetailPanel({
   );
   const visibleTabs = TABS.filter(
     (item) =>
-      (item.value !== "code" || detail === null || detail.capabilities.diff) &&
+      ((item.value !== "code" && item.value !== "diffGuide") ||
+        detail === null ||
+        detail.capabilities.diff) &&
       (item.value !== "guide" || reviewGuidesEnabled),
   );
   // The Code tab can be opened while the detail is still on its way, and the detail may then say
@@ -2790,9 +2812,9 @@ export function PullRequestDetailPanel({
           <PullRequestDetailTabBar
             tabs={visibleTabs}
             value={tab}
-            onValueChange={setTab}
+            onValueChange={pickTab}
             onTabIntent={(item) => {
-              if (item === "code") void loadCodeTab();
+              if (item === "code" || item === "diffGuide") void loadCodeTab();
             }}
           >
             {tab === "summary" ? (
@@ -3052,6 +3074,27 @@ export function PullRequestDetailPanel({
                     onRefresh={refreshDetail}
                   />
                 )}
+              </div>
+            ) : null}
+            {mountedTabs.has("diffGuide") ? (
+              <div className={cn("absolute inset-0", tab !== "diffGuide" && "invisible")}>
+                <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
+                  <PullRequestCodeTab
+                    guideMode
+                    scrollerRef={scrollerRefs.diffGuide}
+                    onAddToAgentSelection={addSelectionToAgent}
+                    environmentId={environmentId}
+                    reference={reference}
+                    detail={detail}
+                    selectedCommitOid={null}
+                    onSelectedCommitChange={selectCodeCommit}
+                    pendingFinding={handoff}
+                    fixFindingLabel={handoffLabels.fixFinding}
+                    {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
+                    onRefresh={refreshDetail}
+                    refreshToken={codeRefreshToken}
+                  />
+                </Suspense>
               </div>
             ) : null}
             {mountedTabs.has("code") ? (

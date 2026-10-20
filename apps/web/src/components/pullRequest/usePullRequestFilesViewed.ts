@@ -37,6 +37,8 @@ export interface PullRequestFilesViewedView {
   readonly setViewed: (path: string, viewed: boolean) => void;
   /** How many of the files on screen are ticked off. */
   readonly viewedCount: number;
+  /** The host has answered at least once, so an unticked box means unticked, not unknown. */
+  readonly loaded: boolean;
   /** The host had more files than the read covered, so the count above may be short. */
   readonly truncated: boolean;
   /**
@@ -72,6 +74,7 @@ export function usePullRequestFilesViewed(options: {
   // that stopped being refreshed look exactly like ticks that are current.
   const states = useMemo(() => toFileViewedStates(query.data), [query.data]);
   const truncated = query.data?.truncated === true;
+  const loaded = query.data !== null && query.data !== undefined;
   const error = query.error;
   const [overlay, setOverlay] = useState<FileViewedOverlay>(NO_OVERLAY);
   const setFilesViewed = useAtomCommand(pullRequestEnvironment.setFilesViewed, {
@@ -202,10 +205,11 @@ export function usePullRequestFilesViewed(options: {
       isStale,
       setViewed,
       viewedCount,
+      loaded,
       truncated,
       error,
       refresh: refreshFromHost,
     }),
-    [enabled, error, isStale, isViewed, refreshFromHost, setViewed, truncated, viewedCount],
+    [enabled, error, isStale, isViewed, loaded, refreshFromHost, setViewed, truncated, viewedCount],
   );
 }

@@ -91,6 +91,14 @@ import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
 import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
+import {
+  DiffGuideOutline,
+  DiffGuideSectionText,
+  DiffGuideSummary,
+  DiffGuideViewSwitch,
+} from "./diffGuide/DiffGuideViews";
+import { type DiffGuideGroup, orderByDiffGuide } from "./diffGuide/diffGuideOrder";
+import { useDiffGuide, useDiffGuideView } from "./diffGuide/useDiffGuide";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
@@ -209,6 +217,8 @@ export default function DiffPanel({
     false,
     Schema.Boolean,
   );
+  const [diffView, setDiffView] = useDiffGuideView();
+  const guideMode = diffView === "guide";
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
@@ -451,6 +461,32 @@ export default function DiffPanel({
   const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
+  const guide = useDiffGuide({
+    environmentId: activeThread?.environmentId ?? null,
+    target: selectedTurn
+      ? activeThreadId !== null && selectedCheckpointRange !== null
+        ? { _tag: "Checkpoint", threadId: activeThreadId, ...selectedCheckpointRange }
+        : null
+      : activeCwd
+        ? {
+            _tag: "Review",
+            cwd: activeCwd,
+            sourceKind: selectedGitScope === "unstaged" ? "working-tree" : "branch-range",
+            baseRef: selectedBaseRef || null,
+          }
+        : null,
+    open: guideMode && hasResolvedPatch && !hasNoNetChanges,
+  });
+  // A working tree changes under the reader; ask again when the diff does. Unchanged diffs are
+  // answered from the server's cache, so this never spends a model request on its own.
+  const retryGuide = guide.retry;
+  const guidedDiffHash = selectedTurn ? null : (selectedGitSource?.diffHash ?? null);
+  const previousGuidedDiffHash = useRef(guidedDiffHash);
+  useEffect(() => {
+    if (previousGuidedDiffHash.current === guidedDiffHash) return;
+    previousGuidedDiffHash.current = guidedDiffHash;
+    if (guideMode && guidedDiffHash !== null) retryGuide();
+  }, [guideMode, guidedDiffHash, retryGuide]);
   const lazySource =
     !selectedTurn && selectedGitSource?.truncated && selectedGitSource.files
       ? selectedGitSource
@@ -513,10 +549,11 @@ export default function DiffPanel({
   );
   const defaultCollapsedDiffFileKeys = useMemo(
     () =>
-      settings.diffFilesCollapsed
+      // A guide is read top to bottom, so its files start open.
+      settings.diffFilesCollapsed && !guideMode
         ? new Set(renderableFileEntries.map((file) => file.fileKey))
         : EMPTY_COLLAPSED_DIFF_FILE_KEYS,
-    [renderableFileEntries, settings.diffFilesCollapsed],
+    [guideMode, renderableFileEntries, settings.diffFilesCollapsed],
   );
   const collapsedDiffFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
@@ -534,7 +571,12 @@ export default function DiffPanel({
   );
   const codeViewFiles = useMemo(
     () =>
-      renderableFileEntries
+      (guideMode
+        ? orderByDiffGuide(renderableFileEntries, guide.guide, (entry) =>
+            resolveFileDiffPath(entry.fileDiff),
+          )
+        : renderableFileEntries
+      )
         .filter(({ fileDiff }) => !lazySource || readyFilePaths.has(resolveFileDiffPath(fileDiff)))
         .map(({ fileDiff, fileKey, fileVersion }) => {
           return {
@@ -548,8 +590,16 @@ export default function DiffPanel({
               fileDiff.cacheKey?.endsWith(":pending") === true,
           };
         }),
-    [collapsedDiffFileKeys, renderableFileEntries, lazySource, readyFilePaths],
+    [
+      collapsedDiffFileKeys,
+      renderableFileEntries,
+      lazySource,
+      readyFilePaths,
+      guideMode,
+      guide.guide,
+    ],
   );
+  const guideEnvironmentId = activeThread?.environmentId ?? null;
   const diffFileKeys = useMemo(
     () => renderableFileEntries.map((file) => file.fileKey),
     [renderableFileEntries],
@@ -614,6 +664,26 @@ export default function DiffPanel({
       settledFileCount,
       requestFile,
     ],
+  );
+  const guideLayout = useMemo(
+    () =>
+      guideMode && guideEnvironmentId !== null
+        ? {
+            guide: guide.guide,
+            renderSection: (group: DiffGuideGroup<{ fileDiff: FileDiffMetadata }>) => (
+              <DiffGuideSectionText
+                number={group.number}
+                total={guide.guide?.sections.length ?? 0}
+                section={group.section}
+                paths={group.items.map((item) => resolveFileDiffPath(item.fileDiff))}
+                environmentId={guideEnvironmentId}
+                cwd={activeCwd ?? ""}
+                onSelectFile={revealDiffFile}
+              />
+            ),
+          }
+        : undefined,
+    [activeCwd, guide.guide, guideEnvironmentId, guideMode, revealDiffFile],
   );
 
   const externalRevealRef = useRef<{ cache: string; key: string } | null>(null);
@@ -955,6 +1025,9 @@ export default function DiffPanel({
             </TooltipPopup>
           </Tooltip>
         )}
+        {diffFileKeys.length > 0 && (
+          <DiffGuideViewSwitch view={diffView} onViewChange={setDiffView} />
+        )}
         <ToggleGroup
           aria-label="Diff layout"
           className="shrink-0"
@@ -1115,8 +1188,9 @@ export default function DiffPanel({
                         node instanceof HTMLElement && node.hasAttribute("data-title"),
                     );
                     const filePath = title?.textContent;
-                    // The filename remains the explicit "open in editor" affordance.
-                    if (filePath) {
+                    // The filename remains the explicit "open in editor" affordance. A guide
+                    // section row's title names no file.
+                    if (filePath && codeViewFiles.some((file) => file.filePath === filePath)) {
                       openDiffFile(filePath);
                       return;
                     }
@@ -1158,6 +1232,18 @@ export default function DiffPanel({
                     className="h-full min-h-0 overflow-auto"
                     files={codeViewFiles}
                     renderCodeViewFooter={renderLoadingBoundary}
+                    {...(guideMode && guideEnvironmentId !== null
+                      ? {
+                          renderCodeViewHeader: () => (
+                            <DiffGuideSummary
+                              state={guide}
+                              environmentId={guideEnvironmentId}
+                              cwd={activeCwd ?? ""}
+                            />
+                          ),
+                        }
+                      : {})}
+                    {...(guideLayout ? { guide: guideLayout } : {})}
                     sectionId={reviewSectionId}
                     sectionTitle={reviewSectionTitle}
                     composerDraftTarget={composerDraftTarget}
@@ -1215,7 +1301,11 @@ export default function DiffPanel({
                     }}
                   />
                 </div>
-                {fileTreeOpen ? (
+                {guideMode && fileTreeOpen ? (
+                  <aside className="flex w-[min(16rem,40%)] min-w-40 shrink-0 border-l border-border/60">
+                    <DiffGuideOutline state={guide} onSelectFile={revealDiffFile} />
+                  </aside>
+                ) : fileTreeOpen ? (
                   <aside className="flex w-[min(16rem,40%)] min-w-40 shrink-0 border-l border-border/60">
                     <DiffFileTree
                       ariaLabel={`${reviewSectionTitle} files`}

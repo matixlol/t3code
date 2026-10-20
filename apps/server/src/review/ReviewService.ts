@@ -27,7 +27,7 @@ export class ReviewService extends Context.Service<
   ReviewService,
   {
     readonly getDiffPreview: (
-      input: ReviewDiffPreviewInput,
+      input: ReviewDiffPreviewInput & { readonly contextLines?: number },
     ) => Effect.Effect<ReviewDiffPreviewResult, ReviewDiffPreviewError>;
     readonly getDiffFileContents: (
       input: ReviewDiffFileContentsInput,

@@ -42,6 +42,8 @@ export interface DiffCheckpointsInput {
   readonly format?: "patch" | "numstat";
   /** Limits the diff to these exact paths. An empty list yields an empty diff. */
   readonly filePaths?: ReadonlyArray<string>;
+  /** Lines of context around each hunk; git's default (3) when absent. */
+  readonly contextLines?: number;
 }
 
 export interface ListAuthoredPathsInput {

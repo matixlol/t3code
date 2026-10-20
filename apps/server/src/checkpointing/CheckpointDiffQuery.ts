@@ -67,7 +67,7 @@ export class CheckpointDiffQuery extends Context.Service<
      * Verifies checkpoint availability in both projection state and filesystem.
      */
     readonly getTurnDiff: (
-      input: OrchestrationGetTurnDiffInput,
+      input: OrchestrationGetTurnDiffInput & { readonly contextLines?: number },
     ) => Effect.Effect<OrchestrationGetTurnDiffResultType, CheckpointServiceError>;
 
     /**
@@ -213,6 +213,7 @@ export const make = Effect.gen(function* () {
         toCheckpointRef: toCheckpoint.ref,
         fallbackFromToHead: false,
         ignoreWhitespace,
+        ...(input.contextLines === undefined ? {} : { contextLines: input.contextLines }),
       };
       // Leave out files that a pull, merge, or rebase brought in, matching the turn's file summary.
       // Filtering is optional: when it cannot run, the complete diff still loads.

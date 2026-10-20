@@ -6,9 +6,8 @@ import type {
   FileDiffMetadata,
   SelectedLineRange,
 } from "@pierre/diffs";
-import type { CodeViewHandle } from "@pierre/diffs/react";
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useCallback, useMemo, useState, type ReactNode, type Ref } from "react";
+import type { DiffGuide, ScopedThreadRef } from "@t3tools/contracts";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { fnv1a32, resolveFileDiffPath } from "~/lib/diffRendering";
@@ -18,6 +17,9 @@ import {
   type ReviewCommentContext,
 } from "~/reviewCommentContext";
 
+import { DiffGuideDocument } from "../diffGuide/DiffGuideDocument";
+import type { DiffViewerHandle } from "../diffGuide/DiffGuideViewer";
+import { type DiffGuideGroup, groupByDiffGuide } from "../diffGuide/diffGuideOrder";
 import { nextFileCommentId } from "../files/fileCommentAnnotations";
 import { DiffCommentAnnotation } from "./DiffCommentAnnotation";
 import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from "./StyledDiffCodeView";
@@ -35,7 +37,7 @@ interface DiffCommentAnnotationGroup {
 }
 
 type DiffCommentLineAnnotation = DiffLineAnnotation<DiffCommentAnnotationGroup>;
-export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup, undefined>;
+export type AnnotatableCodeViewHandle = DiffViewerHandle;
 const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
 
 function annotationSide(range: SelectedLineRange): AnnotationSide {
@@ -84,9 +86,15 @@ interface AnnotatableCodeViewProps {
   sectionTitle: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
   options: StyledDiffCodeViewOptions<DiffCommentAnnotationGroup>;
-  viewerRef?: Ref<AnnotatableCodeViewHandle>;
+  viewerRef?: (handle: AnnotatableCodeViewHandle | null) => void;
   className?: string;
   renderCodeViewFooter?: () => ReactNode;
+  renderCodeViewHeader?: () => ReactNode;
+  /** Lays the files out as a guide document, by section, instead of as one list. */
+  guide?: {
+    readonly guide: DiffGuide | null;
+    readonly renderSection: (group: DiffGuideGroup<{ fileDiff: FileDiffMetadata }>) => ReactNode;
+  };
   unsafeCSSExtra?: string;
   renderHeaderMetadata?: (fileDiff: FileDiffMetadata) => ReactNode;
   renderHeaderFilenameSuffix: (fileDiff: FileDiffMetadata) => ReactNode;
@@ -113,6 +121,8 @@ export function AnnotatableCodeView({
   viewerRef,
   className,
   renderCodeViewFooter,
+  renderCodeViewHeader,
+  guide,
   unsafeCSSExtra,
   renderHeaderMetadata,
   renderHeaderFilenameSuffix,
@@ -249,58 +259,74 @@ export function AnnotatableCodeView({
   );
 
   const hasOpenComment = draft !== null;
-  return (
+  const groups = useMemo(
+    () =>
+      guide === undefined
+        ? undefined
+        : groupByDiffGuide(items, guide.guide, (item) => resolveFileDiffPath(item.fileDiff)),
+    [guide, items],
+  );
+  const shared = {
+    ...(className ? { className } : {}),
+    ...(unsafeCSSExtra ? { unsafeCSSExtra } : {}),
+    ...(renderHeaderMetadata
+      ? {
+          renderHeaderMetadata: (item: CodeViewItem<DiffCommentAnnotationGroup>) =>
+            item.type === "diff" ? renderHeaderMetadata(item.fileDiff) : null,
+        }
+      : {}),
+    ...(renderCodeViewFooter ? { renderCodeViewFooter } : {}),
+    ...(renderCodeViewHeader ? { renderCodeViewHeader } : {}),
+    selectedLines,
+    onSelectedLinesChange: setSelectedLines,
+    onRevealSearchMatch: (item: CodeViewItem<DiffCommentAnnotationGroup>) =>
+      onRevealSearchMatch(item.id),
+    options: {
+      ...options,
+      enableGutterUtility: !hasOpenComment,
+      enableLineSelection: !hasOpenComment,
+      onGutterUtilityClick: beginComment,
+    },
+    renderHeaderFilenameSuffix: (item: CodeViewItem<DiffCommentAnnotationGroup>) =>
+      item.type === "diff" ? renderHeaderFilenameSuffix(item.fileDiff) : null,
+    renderHeaderPrefix: (item: CodeViewItem<DiffCommentAnnotationGroup>) =>
+      item.type === "diff"
+        ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
+        : null,
+    renderAnnotation: (annotation: DiffLineAnnotation<DiffCommentAnnotationGroup>) => {
+      const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
+      return (
+        <div className={hasDraft ? "py-1" : "divide-y divide-border/30 border-y border-border/30"}>
+          {annotation.metadata.entries.map((entry) => (
+            <DiffCommentAnnotation
+              key={entry.id}
+              kind={entry.kind}
+              rangeLabel={entry.rangeLabel}
+              text={entry.kind === "draft" ? draftText : entry.text}
+              onTextChange={setDraftText}
+              onCancel={() => removeEntry(entry.id)}
+              onComment={(text) => submitEntry(entry.id, text)}
+              onDelete={() => removeEntry(entry.id)}
+            />
+          ))}
+        </div>
+      );
+    },
+  };
+  return guide !== undefined && groups !== undefined ? (
+    <DiffGuideDocument<DiffCommentAnnotationGroup>
+      key={codeViewKey}
+      {...(viewerRef ? { viewerRef } : {})}
+      {...shared}
+      groups={groups}
+      renderSection={guide.renderSection}
+    />
+  ) : (
     <StyledDiffCodeView<DiffCommentAnnotationGroup>
       key={codeViewKey}
       {...(viewerRef ? { viewerRef } : {})}
-      {...(className ? { className } : {})}
-      {...(unsafeCSSExtra ? { unsafeCSSExtra } : {})}
-      {...(renderHeaderMetadata
-        ? {
-            renderHeaderMetadata: (item: CodeViewItem<DiffCommentAnnotationGroup>) =>
-              item.type === "diff" ? renderHeaderMetadata(item.fileDiff) : null,
-          }
-        : {})}
-      {...(renderCodeViewFooter ? { renderCodeViewFooter } : {})}
+      {...shared}
       items={items}
-      selectedLines={selectedLines}
-      onSelectedLinesChange={setSelectedLines}
-      onRevealSearchMatch={(item) => onRevealSearchMatch(item.id)}
-      options={{
-        ...options,
-        enableGutterUtility: !hasOpenComment,
-        enableLineSelection: !hasOpenComment,
-        onGutterUtilityClick: beginComment,
-      }}
-      renderHeaderFilenameSuffix={(item) =>
-        item.type === "diff" ? renderHeaderFilenameSuffix(item.fileDiff) : null
-      }
-      renderHeaderPrefix={(item) =>
-        item.type === "diff"
-          ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
-          : null
-      }
-      renderAnnotation={(annotation) => {
-        const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
-        return (
-          <div
-            className={hasDraft ? "py-1" : "divide-y divide-border/30 border-y border-border/30"}
-          >
-            {annotation.metadata.entries.map((entry) => (
-              <DiffCommentAnnotation
-                key={entry.id}
-                kind={entry.kind}
-                rangeLabel={entry.rangeLabel}
-                text={entry.kind === "draft" ? draftText : entry.text}
-                onTextChange={setDraftText}
-                onCancel={() => removeEntry(entry.id)}
-                onComment={(text) => submitEntry(entry.id, text)}
-                onDelete={() => removeEntry(entry.id)}
-              />
-            ))}
-          </div>
-        );
-      }}
     />
   );
 }

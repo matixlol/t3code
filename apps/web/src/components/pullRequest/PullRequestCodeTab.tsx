@@ -26,9 +26,26 @@ import {
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide";
 import { useAtomRefresh } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { DiffGuideDocument } from "../diffGuide/DiffGuideDocument";
+import type { DiffViewerHandle } from "../diffGuide/DiffGuideViewer";
+import {
+  DiffGuideOutline,
+  DiffGuideSectionText,
+  DiffGuideSummary,
+} from "../diffGuide/DiffGuideViews";
+import { type DiffGuideGroup, groupByDiffGuide } from "../diffGuide/diffGuideOrder";
+import { useDiffGuide } from "../diffGuide/useDiffGuide";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
@@ -192,6 +209,7 @@ function PullRequestCodeTab({
   onRefresh,
   refreshToken = 0,
   revealRequest = null,
+  guideMode = false,
 }: {
   scrollerRef: (node: HTMLDivElement | null) => void;
   environmentId: EnvironmentId;
@@ -211,6 +229,11 @@ function PullRequestCodeTab({
   refreshToken?: number;
   /** A file another tab asked to show. A new nonce asks again for the same path. */
   revealRequest?: { readonly path: string; readonly nonce: number } | null;
+  /**
+   * The Guide tab: the same diff, ordered by the guide's sections, with each section's title and
+   * explanation above its first file, or beside its files when the panel is wide. Always the whole change, never one commit.
+   */
+  guideMode?: boolean;
 }) {
   const { resolvedTheme } = useTheme();
   const settings = useClientSettings();
@@ -221,7 +244,8 @@ function PullRequestCodeTab({
   /** Set once the reader has asked for every file at once, until they pick a file apart again. */
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
   const effectiveFoldOverride =
-    foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
+    // A guide is read top to bottom, so its files start open and fold as they are marked viewed.
+    foldOverride ?? (settings.diffFilesCollapsed && !guideMode ? "folded" : "expanded");
   const diffLayout = settings.diffLayout;
   const updateClientSettings = useUpdateClientSettings();
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
@@ -252,6 +276,11 @@ function PullRequestCodeTab({
 
   const referenceKey = pullRequestReviewKey(reference);
   const commit = selectedCommitOid;
+  const guide = useDiffGuide({
+    environmentId,
+    target: { _tag: "PullRequest", reference, commitOid: null },
+    open: guideMode,
+  });
   // One commit's own changes and the whole change are two different diffs, paged separately, so
   // everything below is keyed by both.
   const scopeKey = commit === null ? referenceKey : `${referenceKey}@${commit}`;
@@ -606,6 +635,15 @@ function PullRequestCodeTab({
     [parsedSlices],
   );
   const fileKeys = useMemo(() => items.map((item) => item.id), [items]);
+  // The Guide tab lays the same items out by section, so comments, folding and find work as in
+  // Code.
+  const guideGroups = useMemo(
+    () =>
+      guideMode
+        ? groupByDiffGuide(items, guide.guide, (item) => resolveFileDiffPath(item.fileDiff))
+        : [],
+    [guide.guide, guideMode, items],
+  );
   const collapsedFileKeys = useMemo(
     () => new Set(items.filter((item) => item.collapsed === true).map((item) => item.id)),
     [items],
@@ -670,7 +708,55 @@ function PullRequestCodeTab({
     [effectiveFoldOverride, setViewed],
   );
 
-  const requestTreeReveal = useCodeViewFileReveal(viewer, scopeKey);
+  // Files ticked off before this visit start folded, once each, as if the reader had just ticked
+  // them; one pushed to since stays open. Seeded once per file so a later unfold sticks.
+  const foldSeededFiles = useRef<{ scope: string; keys: Set<string> }>({
+    scope: scopeKey,
+    keys: new Set(),
+  });
+  useEffect(() => {
+    if (!filesViewedEnabled || !filesViewed.loaded) return;
+    if (foldSeededFiles.current.scope !== scopeKey) {
+      foldSeededFiles.current = { scope: scopeKey, keys: new Set() };
+    }
+    const seeded = foldSeededFiles.current.keys;
+    const toFold = annotatedFiles.filter(({ fileKey }) => !seeded.has(fileKey));
+    if (toFold.length === 0) return;
+    for (const { fileKey } of toFold) seeded.add(fileKey);
+    setToggledFiles((current) =>
+      toFold.reduce(
+        (next, { fileKey, path }) =>
+          isFileViewed(path) && !isFileViewedStale(path)
+            ? toggleFileDiffFoldForViewed(fileKey, true, effectiveFoldOverride, next)
+            : next,
+        current,
+      ),
+    );
+  }, [
+    annotatedFiles,
+    effectiveFoldOverride,
+    filesViewed.loaded,
+    filesViewedEnabled,
+    isFileViewed,
+    isFileViewedStale,
+    scopeKey,
+  ]);
+
+  // The Guide tab draws the same items in a guide document, which reveals files the same way.
+  const [guideViewer, setGuideViewer] = useState<DiffViewerHandle | null>(null);
+  // In the guide, ticking a file off moves on to the next one, as Linear's does.
+  const guideViewerRef = useRef(guideViewer);
+  useLayoutEffect(() => {
+    guideViewerRef.current = guideViewer;
+  });
+  const markFileViewed = useCallback(
+    (fileKey: string, path: string, viewed: boolean) => {
+      setFileViewed(fileKey, path, viewed);
+      if (guideMode && viewed) guideViewerRef.current?.revealAfterFile?.(fileKey);
+    },
+    [guideMode, setFileViewed],
+  );
+  const requestTreeReveal = useCodeViewFileReveal(guideMode ? guideViewer : viewer, scopeKey);
   const revealFile = useCallback(
     (path: string) => {
       const item = items.find((candidate) => resolveFileDiffPath(candidate.fileDiff) === path);
@@ -827,8 +913,8 @@ function PullRequestCodeTab({
   // host's answer, would rebuild every header on screen.
   const filesViewedRef = useRef(filesViewed);
   filesViewedRef.current = filesViewed;
-  const setFileViewedRef = useRef(setFileViewed);
-  setFileViewedRef.current = setFileViewed;
+  const setFileViewedRef = useRef(markFileViewed);
+  setFileViewedRef.current = markFileViewed;
 
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<ReviewAnnotationGroup>) => {
@@ -1060,7 +1146,9 @@ function PullRequestCodeTab({
     ),
     [
       addComment,
+      detail.workspaceRoot,
       draft,
+      environmentId,
       finishSelection,
       onAddToAgentSelection,
       removeComment,
@@ -1068,6 +1156,66 @@ function PullRequestCodeTab({
       reviewKey,
     ],
   );
+  const renderGuideSummary = useCallback(
+    () => (
+      <DiffGuideSummary state={guide} environmentId={environmentId} cwd={detail.workspaceRoot} />
+    ),
+    [detail.workspaceRoot, environmentId, guide],
+  );
+  const guideSectionCount = guide.guide?.sections.length ?? 0;
+  const renderGuideSection = useCallback(
+    (group: DiffGuideGroup<CodeViewDiffItem<ReviewAnnotationGroup>>) => (
+      <DiffGuideSectionText
+        number={group.number}
+        total={guideSectionCount}
+        section={group.section}
+        paths={group.items.map((item) => resolveFileDiffPath(item.fileDiff))}
+        environmentId={environmentId}
+        cwd={detail.workspaceRoot}
+        onSelectFile={revealFile}
+        review={
+          filesViewedEnabled
+            ? {
+                isViewed: isFileViewed,
+                isStale: isFileViewedStale,
+                // Each file folds as it is ticked off, exactly as its own box would.
+                setSectionViewed: (viewed) => {
+                  for (const item of group.items) {
+                    setFileViewed(item.id, resolveFileDiffPath(item.fileDiff), viewed);
+                  }
+                  const last = group.items.at(-1);
+                  if (viewed && last !== undefined) guideViewer?.revealAfterFile?.(last.id);
+                },
+              }
+            : undefined
+        }
+      />
+    ),
+    [
+      detail.workspaceRoot,
+      environmentId,
+      filesViewedEnabled,
+      guideSectionCount,
+      guideViewer,
+      isFileViewed,
+      isFileViewedStale,
+      revealFile,
+      setFileViewed,
+    ],
+  );
+  // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
+  const revealSearchMatch = useCallback(
+    (item: CodeViewItem<ReviewAnnotationGroup>) =>
+      setToggledFiles((current) =>
+        toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
+      ),
+    [effectiveFoldOverride],
+  );
+  // The guide orders every file of the change, so its tab reads the whole diff up front rather
+  // than a slice at a time as the reader scrolls.
+  useEffect(() => {
+    if (guideMode && canLoadNextSlice) loadNextSlice();
+  }, [canLoadNextSlice, guideMode, loadNextSlice]);
 
   // A rebase or a force-push can take the scoped commit out of the change. Its diff may still
   // be reachable on the host, but it is no longer part of what is being reviewed, so the scope
@@ -1093,7 +1241,7 @@ function PullRequestCodeTab({
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {/* A host that reports no commits has nothing to scope by, and a dropdown whose only
             entry is the scope already showing is a control that does nothing. */}
-        {orderedCommits.length > 0 ? (
+        {orderedCommits.length > 0 && !guideMode ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button size="xs" variant="secondary" />}
@@ -1571,35 +1719,54 @@ function PullRequestCodeTab({
           {/* The viewer virtualizes against the element it is told is scrolling and places its
               rows absolutely, so it has to own that element — the thread diff panel hands it the
               same one. Scrolling from a parent instead leaves it painting over its neighbours. */}
-          <StyledDiffCodeView<ReviewAnnotationGroup>
-            // Keep scrollbar space stable so file metadata and line numbers do not shift as a
-            // diff crosses the overflow boundary. The viewer is itself focusable for keyboard
-            // interaction, but its native host outline clips and competes with the focus
-            // indicators on its actual controls.
-            className="@container h-full overflow-auto [scrollbar-gutter:stable]"
-            containerRef={scrollerRef}
-            viewerRef={setViewer}
-            items={items}
-            selectedLines={selectedLines}
-            onSelectedLinesChange={setSelectedLines}
-            options={diffViewOptions}
-            // The viewer owns the scroll container, so the sentinel that asks for the next slice
-            // has to live inside it — at the end of the files, where reaching it means the reader
-            // is running out of diff.
-            renderCodeViewFooter={renderCodeViewFooter}
-            renderHeaderPrefix={renderHeaderPrefix}
-            renderHeaderMetadata={renderHeaderMetadata}
-            renderAnnotation={renderAnnotation}
-            // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
-            onRevealSearchMatch={(item) =>
-              setToggledFiles((current) =>
-                toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
-              )
-            }
-            unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
-          />
+          {guideMode ? (
+            <DiffGuideDocument<ReviewAnnotationGroup>
+              className="h-full overflow-auto [scrollbar-gutter:stable]"
+              containerRef={scrollerRef}
+              viewerRef={setGuideViewer}
+              groups={guideGroups}
+              renderSection={renderGuideSection}
+              selectedLines={selectedLines}
+              onSelectedLinesChange={setSelectedLines}
+              options={diffViewOptions}
+              renderCodeViewFooter={renderCodeViewFooter}
+              renderCodeViewHeader={renderGuideSummary}
+              renderHeaderPrefix={renderHeaderPrefix}
+              renderHeaderMetadata={renderHeaderMetadata}
+              renderAnnotation={renderAnnotation}
+              onRevealSearchMatch={revealSearchMatch}
+              unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+            />
+          ) : (
+            <StyledDiffCodeView<ReviewAnnotationGroup>
+              // Keep scrollbar space stable so file metadata and line numbers do not shift as a
+              // diff crosses the overflow boundary. The viewer is itself focusable for keyboard
+              // interaction, but its native host outline clips and competes with the focus
+              // indicators on its actual controls.
+              className="@container h-full overflow-auto [scrollbar-gutter:stable]"
+              containerRef={scrollerRef}
+              viewerRef={setViewer}
+              items={items}
+              selectedLines={selectedLines}
+              onSelectedLinesChange={setSelectedLines}
+              options={diffViewOptions}
+              // The viewer owns the scroll container, so the sentinel that asks for the next slice
+              // has to live inside it — at the end of the files, where reaching it means the
+              // reader is running out of diff.
+              renderCodeViewFooter={renderCodeViewFooter}
+              renderHeaderPrefix={renderHeaderPrefix}
+              renderHeaderMetadata={renderHeaderMetadata}
+              renderAnnotation={renderAnnotation}
+              onRevealSearchMatch={revealSearchMatch}
+              unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+            />
+          )}
         </div>
-        {fileTreeOpen ? (
+        {guideMode && fileTreeOpen ? (
+          <aside className="flex w-[min(18rem,40%)] min-w-48 shrink-0 border-l border-border/60">
+            <DiffGuideOutline state={guide} onSelectFile={revealFile} />
+          </aside>
+        ) : fileTreeOpen ? (
           <aside className="flex w-[min(20rem,40%)] min-w-48 shrink-0 border-l border-border/60">
             <DiffFileTree
               ariaLabel={`Pull request #${detail.number} files`}

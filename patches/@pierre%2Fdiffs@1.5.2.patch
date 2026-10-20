@@ -328,6 +328,64 @@ index 140f94f..96fc774 100644
  function prepareItemInstance(item) {
  	item.instance.cleanUp(true);
  	if (item.type === "diff") return item.instance.updateCodeViewLayout(item.item.fileDiff, item.top, void 0, item.item.annotations ?? []);
+diff --git a/dist/components/CodeViewSearch.d.ts b/dist/components/CodeViewSearch.d.ts
+new file mode 100644
+index 0000000..1a2b3c4
+--- /dev/null
++++ b/dist/components/CodeViewSearch.d.ts
+@@ -0,0 +1,52 @@
++import { CodeViewItem } from "../types.js";
++
++//#region src/components/CodeViewSearch.d.ts
++/** One occurrence of the query on one line of one diff item. */
++interface CodeViewSearchMatch {
++  id: string;
++  itemIndex: number;
++  side: 'additions' | 'deletions';
++  isContext: boolean;
++  lineNumber: number;
++  unifiedLineIndex: number;
++  start: number;
++  end: number;
++  range: [number, number];
++}
++/** What find needs from the view it searches. CodeView is one; another view of diffs can be too. */
++interface CodeViewSearchHost<LAnnotation = unknown> {
++  getContainerElement(): HTMLElement | undefined;
++  getStickyHeaderOffset(): number;
++  getSearchItems(): readonly CodeViewItem<LAnnotation>[];
++  getFirstVisibleSearchMatchIndex(entries: readonly CodeViewSearchMatch[]): number;
++  cancelSearchReveal(): void;
++  revealSearchMatch(match: CodeViewSearchMatch): void;
++  getMountedSearchMatches(entriesByItem: ReadonlyMap<number, readonly CodeViewSearchMatch[]>): {
++    entry: CodeViewSearchMatch;
++    element: HTMLElement;
++  }[];
++  revealSearchMatchHorizontally(match: CodeViewSearchMatch, element: HTMLElement): void;
++}
++interface CodeViewSearchParams {
++  text: string;
++  caseSensitive: boolean;
++  wholeWord: boolean;
++  regex: boolean;
++}
++declare class CodeViewSearch<LAnnotation = unknown> {
++  constructor(view: CodeViewSearchHost<LAnnotation>);
++  get isOpen(): boolean;
++  /** Open the panel, or refocus it when it is already open. */
++  open(): void;
++  close(): void;
++  /** Rerun the query after the items change; `force` covers diffs filled in place. */
++  refresh(force?: boolean): void;
++  /** Repaint highlights for the rows now mounted. */
++  repaint(): void;
++  ownsEvent(event: Event): boolean;
++  handleKeyDown: (event: KeyboardEvent) => void;
++  cleanUp(): void;
++}
++declare function collectMatches<LAnnotation>(items: readonly CodeViewItem<LAnnotation>[], params: CodeViewSearchParams): CodeViewSearchMatch[];
++//#endregion
++export { CodeViewSearch, CodeViewSearchHost, CodeViewSearchMatch, CodeViewSearchParams, collectMatches };
 diff --git a/dist/components/CodeViewSearch.js b/dist/components/CodeViewSearch.js
 new file mode 100644
 index 0000000..29370ad
@@ -993,7 +1051,7 @@ diff --git a/package.json b/package.json
 index d9dc7b5..3c37bae 100644
 --- a/package.json
 +++ b/package.json
-@@ -58,6 +58,18 @@
+@@ -58,6 +58,22 @@
      "./worker/worker-portable.js": {
        "types": "./dist/worker/worker-portable.d.ts",
        "import": "./dist/worker/worker-portable.js"
@@ -1009,6 +1067,10 @@ index d9dc7b5..3c37bae 100644
 +    "./utils/parsePatchFiles": {
 +      "types": "./dist/utils/parsePatchFiles.d.ts",
 +      "import": "./dist/utils/parsePatchFiles.js"
++    },
++    "./components/CodeViewSearch": {
++      "types": "./dist/components/CodeViewSearch.d.ts",
++      "import": "./dist/components/CodeViewSearch.js"
      }
    },
    "publishConfig": {
