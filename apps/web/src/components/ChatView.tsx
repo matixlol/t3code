@@ -186,6 +186,7 @@ import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
+import { useThreadWindowTitle } from "~/hooks/useThreadWindowTitle";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import {
   type ComposerSubmissionIntent,
@@ -2591,6 +2592,19 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  useThreadWindowTitle(
+    isServerThread ? activeThreadRef : null,
+    activeThread
+      ? {
+          threadTitle: activeThread.title,
+          branch: activeThread.branch,
+          projectName: activeProject?.title ?? null,
+          worktreePath: activeThread.worktreePath,
+          lastPrompt:
+            serverProjection?.messages.findLast((message) => message.role === "user")?.text ?? null,
+        }
+      : null,
+  );
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
     () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
