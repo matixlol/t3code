@@ -176,6 +176,13 @@ import {
   ThreadLinearIssuesInput,
 } from "./linearIssue.ts";
 import {
+  SpriteActionInput,
+  SpriteActionResult,
+  SpriteError,
+  SpriteUsage,
+  SpritesListResult,
+} from "./sprite.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestCommentInput,
@@ -559,6 +566,9 @@ export const WS_METHODS = {
   diffGuideSetApiKey: "diffGuide.setApiKey",
   linearIssuesSubscribe: "linearIssues.subscribe",
   linearIssuesUnlink: "linearIssues.unlink",
+  spritesList: "sprites.list",
+  spritesAction: "sprites.action",
+  spriteUsage: "sprite.usage",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
   pullRequestsFilesViewed: "pullRequests.filesViewed",
@@ -1086,6 +1096,26 @@ const WsLinearIssuesUnlinkRpc = Rpc.make(WS_METHODS.linearIssuesUnlink, {
   payload: ThreadLinearIssueUnlinkInput,
   success: Schema.Struct({ wasLinked: Schema.Boolean }),
   error: ThreadLinearIssueError,
+});
+
+// Mode's sprites, read from and driven through the `sprite` CLI login on this server's machine.
+const WsSpritesListRpc = Rpc.make(WS_METHODS.spritesList, {
+  payload: Schema.Struct({}),
+  success: SpritesListResult,
+  error: SpriteError,
+});
+
+// Creates, pairs with, updates or destroys one of Mode's sprites.
+const WsSpritesActionRpc = Rpc.make(WS_METHODS.spritesAction, {
+  payload: SpriteActionInput,
+  success: SpriteActionResult,
+  error: SpriteError,
+});
+
+// Answered by a server running on a sprite: what its compute has cost.
+const WsSpriteUsageRpc = Rpc.make(WS_METHODS.spriteUsage, {
+  payload: Schema.Struct({}),
+  success: SpriteUsage,
 });
 
 const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadComments, {
@@ -2008,6 +2038,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsDiffGuideSetApiKeyRpc,
   WsLinearIssuesSubscribeRpc,
   WsLinearIssuesUnlinkRpc,
+  WsSpritesListRpc,
+  WsSpritesActionRpc,
+  WsSpriteUsageRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
   WsPullRequestsFilesViewedRpc,

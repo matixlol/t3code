@@ -44,6 +44,8 @@ import * as PullRequestReviewGuides from "./persistence/PullRequestReviewGuides.
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import * as DiffGuideService from "./diffGuide/DiffGuideService.ts";
 import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
+import * as SpriteHost from "./sprite/SpriteHost.ts";
+import * as SpriteService from "./sprite/SpriteService.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor.ts";
@@ -738,6 +740,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(DiffGuideService.layer),
   // WebSocket subscribers and the MCP tools share one instance, so a link wakes every watcher.
   Layer.provide(ThreadLinearIssues.layer),
+  // Sprites this machine's `sprite` CLI can reach, and, on a sprite, keeping it awake for agents.
+  Layer.provide(Layer.mergeAll(SpriteService.layer, SpriteHost.layer)),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP. Provided
   // after the guide service so it reaches that too.

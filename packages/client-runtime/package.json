@@ -219,6 +219,10 @@
       "types": "./src/state/diffGuide.ts",
       "default": "./src/state/diffGuide.ts"
     },
+    "./state/sprites": {
+      "types": "./src/state/sprites.ts",
+      "default": "./src/state/sprites.ts"
+    },
     "./state/linearIssues": {
       "types": "./src/state/linearIssues.ts",
       "default": "./src/state/linearIssues.ts"

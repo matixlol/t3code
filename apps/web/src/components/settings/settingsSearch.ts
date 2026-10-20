@@ -995,6 +995,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
+    id: "sprites",
+    title: "Sprites",
+    to: "/settings/connections",
+    searchTerms: ["fly fly.io sprite sandbox cloud remote create cost usage claude codex"],
+  },
+  {
     id: "load-balancing",
     title: "Load balancing",
     to: "/settings/connections",
