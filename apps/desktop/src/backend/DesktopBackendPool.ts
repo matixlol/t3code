@@ -308,8 +308,8 @@ export const layer = Layer.effect(
       onStateDirOwned: () =>
         electronDialog
           .showErrorBox(
-            "This T3 home is unavailable",
-            "Another T3 Code server, such as the background service, is using this data directory. Stop that server and reopen T3 Code, or set a separate T3CODE_HOME and pair with the running server.",
+            "T3 Code is using your data",
+            "Mode shares its data with T3 Code, and only one of them can run a server on it at a time. Quit T3 Code (and stop its background service, if it runs one) and reopen Mode. If T3 Code was just updated, Mode also stays closed until it is rebuilt on that release, so an older Mode never writes to newer data.",
           )
           .pipe(Effect.andThen(electronApp.quit)),
     });

@@ -166,7 +166,7 @@ describe("DesktopConnectionCatalogStore", () => {
             lastConnectedAt: null,
           },
         ];
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(
           environment.savedEnvironmentRegistryPath,
           yield* encodeLegacySavedEnvironments({
@@ -251,8 +251,8 @@ describe("DesktopConnectionCatalogStore", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        const catalogPath = path.join(environment.modeStateDir, "connection-catalog.json");
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(catalogPath, "{not-json");
 
         const error = yield* store.get.pipe(Effect.flip);
@@ -351,7 +351,7 @@ describe("DesktopConnectionCatalogStore", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(environment.savedEnvironmentRegistryPath, "{not-json");
 
         const error = yield* store.get.pipe(Effect.flip);
@@ -360,7 +360,10 @@ describe("DesktopConnectionCatalogStore", () => {
           DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreMigrationError,
         );
         assert.equal(error.operation, "read-legacy-registry");
-        assert.equal(error.catalogPath, path.join(environment.stateDir, "connection-catalog.json"));
+        assert.equal(
+          error.catalogPath,
+          path.join(environment.modeStateDir, "connection-catalog.json"),
+        );
         assert.instanceOf(
           error.cause,
           DesktopSavedEnvironments.DesktopSavedEnvironmentsDocumentDecodeError,
@@ -370,7 +373,7 @@ describe("DesktopConnectionCatalogStore", () => {
         assert.exists(registryError.cause);
         assert.equal(
           error.message,
-          `Legacy desktop saved-environment migration failed during read-legacy-registry into ${path.join(environment.stateDir, "connection-catalog.json")}.`,
+          `Legacy desktop saved-environment migration failed during read-legacy-registry into ${path.join(environment.modeStateDir, "connection-catalog.json")}.`,
         );
         assert.notEqual(error.message, registryError.message);
       }),
@@ -384,8 +387,8 @@ describe("DesktopConnectionCatalogStore", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        const catalogPath = path.join(environment.modeStateDir, "connection-catalog.json");
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(catalogPath, '{"version":1,"encryptedCatalog":"%%%"}\n');
 
         const error = yield* store.get.pipe(Effect.flip);

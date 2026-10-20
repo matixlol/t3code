@@ -47,7 +47,7 @@ const encodeSavedEnvironmentRegistryDocumentProbe = Schema.encodeEffect(
 const seedSavedEnvironmentRegistry = Effect.fn(function* (encryptedBearerToken?: string) {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
-  yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+  yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
   const encoded = yield* encodeSavedEnvironmentRegistryDocumentProbe({
     version: 1,
     records: [
@@ -172,7 +172,7 @@ describe("DesktopSavedEnvironments", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(
           environment.savedEnvironmentRegistryPath,
           `{
@@ -294,7 +294,7 @@ describe("DesktopSavedEnvironments", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(environment.savedEnvironmentRegistryPath, "{}\n");
 
         assert.deepEqual(yield* savedEnvironments.getRegistry, []);
@@ -311,7 +311,7 @@ describe("DesktopSavedEnvironments", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(environment.savedEnvironmentRegistryPath, "{not-json");
 
         const registryError = yield* savedEnvironments.getRegistry.pipe(Effect.flip);

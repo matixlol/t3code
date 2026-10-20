@@ -8,8 +8,11 @@
  * schema is always up to date before the application starts.
  */
 
+import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
+import * as Runtime from "effect/Runtime";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
@@ -207,6 +210,40 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
   });
 });
 
+export class DatabaseFromNewerBuildError extends Schema.TaggedError<DatabaseFromNewerBuildError>()(
+  "DatabaseFromNewerBuildError",
+  { migrations: Schema.Array(Schema.String) },
+) {
+  // Mode shares T3 Code's data home. Exit like an owned state dir so the desktop app explains it
+  // and quits instead of restarting the backend.
+  override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
+
+  override get message(): string {
+    return `This database was migrated by a newer build (${this.migrations.join(", ")}). Update this build before opening it, so it never writes to a schema it does not know.`;
+  }
+}
+
+/** Fail before touching a database that has migrations this build does not know. */
+const assertNotFromNewerBuild = Effect.fn("assertNotFromNewerBuild")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  const latestKnownId = Math.max(...migrationEntries.map(([id]) => id));
+  const newer = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id > ${latestKnownId}`;
+  if (newer.length === 0) return;
+  // A defect, so the error keeps upstream's typed signatures; its exit code still reaches the process.
+  return yield* Effect.die(
+    new DatabaseFromNewerBuildError({
+      migrations: newer.map((row) => `${row.migration_id}_${row.name}`),
+    }),
+  );
+});
+
 /**
  * Migrator run function - no schema dumping needed
  * Uses the base Migrator.make without platform dependencies
@@ -235,6 +272,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
+  }
+  if (toMigrationInclusive === undefined) {
+    yield* assertNotFromNewerBuild();
   }
   const executedMigrations = [
     ...previewMigrations,
