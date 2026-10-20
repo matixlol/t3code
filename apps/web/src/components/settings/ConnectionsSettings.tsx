@@ -46,6 +46,7 @@ import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { usePeerLinkHosts } from "~/state/peerLinks";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { PullRequestRoutingSettings } from "./PullRequestRoutingSettings";
+import { SpritesSettings } from "./SpritesSettings";
 import { Input } from "../ui/input";
 import {
   Dialog,
@@ -1649,6 +1650,10 @@ function ConnectionsSettingsContent({
           isSearchTarget={index === 0}
         />
       ))}
+      <SpritesSettings
+        primaryEnvironmentId={primaryEnvironmentId}
+        environments={listedEnvironments}
+      />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <PullRequestRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

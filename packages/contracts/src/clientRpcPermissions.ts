@@ -43,6 +43,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.pullRequestsGenerateReviewGuide]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectsCreateFromThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.linearIssuesUnlink]: AuthOrchestrationOperateScope,
+  // Sprites cost money and pairing one grants access to another environment.
+  [WS_METHODS.spritesAction]: AuthSettingsWriteScope,
   [WS_METHODS.sourceControlCloneRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlPublishRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlStar]: AuthSourceControlWriteScope,

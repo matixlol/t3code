@@ -14,11 +14,6 @@ stable ("Beta") release. Fork changes are kept small and in separate commits so 
   an older Mode never writes to a schema it does not know. Rebase onto a release only once T3 Code has
   updated to it. What is encrypted with Mode's own keychain key (Connect sign-in, saved connections)
   and Mode's `t3` launcher live in `~/.mode` instead, so the two apps never overwrite each other's.
-- **Diff guides** (`apps/server/src/diffGuide`, `apps/web/src/components/diffGuide`): a Linear-style
-  guide for pull request and thread diffs, written in one shot by DeepSeek Flash through OpenRouter.
-  Requests are routed to zero-data-retention providers only (`provider.zdr`).
-  Toggle it with the sparkles button in any diff toolbar. The OpenRouter key is entered in the guide
-  pane (stored in `~/.t3/userdata/secrets`) or read from `OPENROUTER_API_KEY`.
 - **Linear issues** (`apps/server/src/linear`, `apps/web/src/components/linear`): agents link the
   Linear issue a thread works on with the `link_linear_issue` MCP tool (URL and title, no Linear auth),
   and it shows beside the thread's pull requests. Stored in `mode_thread_linear_issues`, a table the
@@ -26,9 +21,16 @@ stable ("Beta") release. Fork changes are kept small and in separate commits so 
 - **Window title** (`apps/web/src/hooks/useThreadWindowTitle.ts`): the window is titled after the
   thread on screen (Linear issues, title, branch, project, worktree, last prompt) so time trackers
   like Timing can tell threads apart.
+- **Sprites** (`apps/server/src/sprite`, Settings → Connections → Sprites): Fly.io sandboxes running
+  Mode's server behind a public URL, protected by pairing. Mode lists them from the local `sprite` CLI
+  login (names prefixed `mode-`, never waking them) and stores nothing about them. Creating or updating
+  one installs the latest Claude Code, Codex and Mode server bundle, which `scripts/mode/publish-server.ts`
+  uploads to the fork's `mode-server` release after every `install-macos.ts` build; native modules come
+  from upstream's `@t3code/t3-linux-*` package of the same version. On a sprite the server holds a
+  sprite task while agent runs are active (a sprite otherwise pauses with no client connected) and
+  estimates its own cost from cgroup CPU and memory at Fly's rates.
 - **No database migrations.** Never add one in the fork: upstream's next migration would reuse the id
-  and be skipped silently. Diff guides cache on disk under `~/.t3/caches/diff-guides` instead, and Mode-only
-  tables are created with `CREATE TABLE IF NOT EXISTS` under a `mode_` prefix.
+  and be skipped silently. Mode-only tables are created with `CREATE TABLE IF NOT EXISTS` under a `mode_` prefix.
 
 ## Rebasing onto a new upstream release
 
