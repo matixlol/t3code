@@ -91,6 +91,7 @@ import {
 } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
+import { SpritesSettings } from "./SpritesSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -4179,6 +4180,10 @@ export function ConnectionsSettings() {
           }}
         />
       ) : null}
+      <SpritesSettings
+        primaryEnvironmentId={primaryEnvironmentId}
+        environments={listedEnvironments}
+      />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

@@ -30,6 +30,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // The diff guide key spends this environment's OpenRouter credit, like any other setting.
   [WS_METHODS.diffGuideSetApiKey]: AuthSettingsWriteScope,
   [WS_METHODS.linearIssuesUnlink]: AuthOrchestrationOperateScope,
+  // Sprites cost money and pairing one grants access to another environment.
+  [WS_METHODS.spritesAction]: AuthSettingsWriteScope,
   [WS_METHODS.sourceControlCloneRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlPublishRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.projectCloneStart]: AuthSourceControlWriteScope,

@@ -26,6 +26,7 @@ export * from "./chatAttachment.ts";
 export * from "./checkpointDiff.ts";
 export * from "./diffGuide.ts";
 export * from "./linearIssue.ts";
+export * from "./sprite.ts";
 export * from "./model.ts";
 export * from "./keybindings.ts";
 export * from "./server.ts";
