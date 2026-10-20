@@ -99,6 +99,13 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "unlink-pr",
     "pull-request",
   ),
+  // Mode's Linear links summarize as thread metadata updates, which is what they are.
+  link_linear_issue: tool(["Link", "Linking", "Linked", "a Linear issue"], "thread-update"),
+  unlink_linear_issue: tool(["Unlink", "Unlinking", "Unlinked", "a Linear issue"], "thread-update"),
+  list_thread_linear_issues: tool(
+    ["Check", "Checking", "Checked", "linked Linear issues"],
+    "thread-update",
+  ),
   list_thread_pull_requests: tool(
     ["Check", "Checking", "Checked", "linked pull requests"],
     "list-prs",

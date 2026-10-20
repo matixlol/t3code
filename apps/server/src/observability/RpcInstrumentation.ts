@@ -111,6 +111,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.pullRequestsActivity]: "pull-requests",
   [WS_METHODS.pullRequestsReviewGuide]: "pull-requests",
   [WS_METHODS.pullRequestsGenerateReviewGuide]: "pull-requests",
+  [WS_METHODS.linearIssuesSubscribe]: "linear-issues",
+  [WS_METHODS.linearIssuesUnlink]: "linear-issues",
   [WS_METHODS.pullRequestsThreadComments]: "pull-requests",
   [WS_METHODS.pullRequestsDiffFileContents]: "pull-requests",
   [WS_METHODS.pullRequestsFilesViewed]: "pull-requests",
