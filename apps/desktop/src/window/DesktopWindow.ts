@@ -660,9 +660,11 @@ export const make = Effect.gen(function* () {
       runFork(zoomWindow(window, direction));
     });
 
-    window.on("page-title-updated", (event) => {
+    // Mode: the window carries the page's title, which names the thread on screen, so time
+    // trackers that read window titles can tell threads apart. The title bar is hidden anyway.
+    window.on("page-title-updated", (event, title) => {
       event.preventDefault();
-      window.setTitle(environment.displayName);
+      window.setTitle(title.trim() === "" ? environment.displayName : title);
     });
     window.on("resize", scheduleBoundsPersist);
     window.on("move", scheduleBoundsPersist);

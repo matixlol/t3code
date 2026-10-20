@@ -127,6 +127,7 @@ import {
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { useDiffPanelStore } from "../diffPanelStore";
+import { useThreadWindowTitle } from "~/hooks/useThreadWindowTitle";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import { composerRequiresModifier } from "../composer-logic";
 import {
@@ -1074,6 +1075,19 @@ export default function ChatView(props: ChatViewProps) {
       ? scopeProjectRef(activeThreadEnvironmentId, activeThreadProjectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  useThreadWindowTitle(
+    isServerThread ? activeThreadRef : null,
+    activeThread
+      ? {
+          threadTitle: activeThread.title,
+          branch: activeThread.branch,
+          projectName: activeProject?.title ?? null,
+          worktreePath: activeThread.worktreePath,
+          lastPrompt:
+            serverProjection?.messages.findLast((message) => message.role === "user")?.text ?? null,
+        }
+      : null,
+  );
   const activeProjectSettings = resolveProjectSettings(
     settings,
     activeProject?.id ?? null,

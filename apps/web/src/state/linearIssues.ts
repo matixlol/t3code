@@ -28,7 +28,8 @@ const threadLinearIssuesAtom = Atom.family((key: string) =>
 
 /** The Linear issues agents linked to a thread; empty until the server answers. */
 export function useThreadLinearIssues(
-  threadRef: ScopedThreadRef,
+  threadRef: ScopedThreadRef | null,
 ): ReadonlyArray<ThreadLinearIssue> {
-  return useAtomValue(threadLinearIssuesAtom(scopedThreadKey(threadRef)));
+  // An empty key parses to no thread, which is no issues.
+  return useAtomValue(threadLinearIssuesAtom(threadRef === null ? "" : scopedThreadKey(threadRef)));
 }
