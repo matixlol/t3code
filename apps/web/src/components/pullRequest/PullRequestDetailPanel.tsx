@@ -23,7 +23,6 @@ import {
   type PullRequestListEntry,
   type PullRequestUpdateMethod,
   type PullRequestRef,
-  type PullRequestReviewGuideStop,
   type PullRequestSummary,
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
@@ -49,7 +48,6 @@ import {
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { type PullRequestDetailTab, useRightPanelStore } from "~/rightPanelStore";
-import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
@@ -72,7 +70,6 @@ import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { pullRequestEnvironment, usePullRequestTurnRefresh } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { PullRequestStackMenu } from "./PullRequestStackMenu";
-import { pullRequestCompletionScope } from "./PullRequestMarkdownTextarea";
 import { PullRequestChangeBreakdownStat } from "./PullRequestChangeBreakdownStat";
 import {
   capitalizeTerm,
@@ -118,7 +115,6 @@ import { PullRequestSummaryTab } from "./PullRequestSummaryTab";
 import { PullRequestTimelineTab } from "./PullRequestTimelineTab";
 import {
   buildAddSelectionToAgentHandoff,
-  buildAskAboutGuideStopHandoff,
   buildAskAboutPullRequestHandoff,
   buildExplainPullRequestHandoff,
   buildFixFindingHandoff,
@@ -163,9 +159,7 @@ import {
   resolvePullRequestState,
   summarizePullRequestChecks,
 } from "./pullRequestPresentation";
-import { PullRequestGuideTab } from "./PullRequestGuideTab";
 import { guideRunKey, useGuideRunStore } from "./guide/guideRunStore";
-import { useReviewGuideWriter } from "./guide/useReviewGuideWriter";
 
 const actionFailureLabels = (term: string): Record<PullRequestAction, string> => ({
   merge: `Could not merge this ${term}`,
@@ -294,7 +288,6 @@ export function PullRequestDetailPanel({
   composerDraftTarget,
   onBack,
   onSelectPullRequest,
-  onGuideShown,
   revealUrl,
   onRevealSettled,
   initialTab = "summary",
@@ -322,7 +315,6 @@ export function PullRequestDetailPanel({
   context?: "page" | "thread";
   composerDraftTarget?: ScopedThreadRef | DraftId;
   onBack?: (() => void) | undefined;
-  onGuideShown?: (() => void) | undefined;
   /** A clicked link into this pull request, waiting to be shown. */
   revealUrl?: string | undefined;
   /** Reports the link it was given shown or missing, so a newer link stays pending. */
@@ -375,7 +367,6 @@ export function PullRequestDetailPanel({
   );
   useEnvironmentQuery(pullRequestEnvironment.changeBreakdown({ environmentId, input: reference }));
   const [threadPickerOpen, setThreadPickerOpen] = useState(false);
-  const [openReviewRequest, setOpenReviewRequest] = useState(0);
   const {
     canWriteSourceControl,
     detailQuery,
@@ -389,10 +380,6 @@ export function PullRequestDetailPanel({
   const [selectedTab, setTab] = useState<PullRequestDetailTab>(
     () => linkedTab(revealAnchor) ?? initialTab,
   );
-  const reviewGuidesEnabled = useEnvironmentSettings(
-    environmentId,
-    (settings) => settings.reviewGuidesEnabled,
-  );
   const guideKey = guideRunKey(environmentId, reference);
   const pageTab = useGuideRunStore((state) =>
     tabOnPage && state.pageDetailTab?.key === guideKey ? state.pageDetailTab.tab : null,
@@ -400,7 +387,8 @@ export function PullRequestDetailPanel({
   const requestedTab = tabOnPage ? (pageTab ?? initialTab) : selectedTab;
   const isTabAvailable = (value: PullRequestDetailTab) =>
     (value !== "code" || detail === null || detail.capabilities.diff) &&
-    (value !== "guide" || reviewGuidesEnabled);
+    // Mode's diff guide stands in for upstream's agent-written tour, and needs the diff.
+    (value !== "guide" || detail === null || detail.capabilities.diff);
   // An unavailable tab falls back without overwriting the saved selection.
   const tab = isTabAvailable(requestedTab) ? requestedTab : "summary";
   const selectTab = (next: PullRequestDetailTab) => {
@@ -420,16 +408,6 @@ export function PullRequestDetailPanel({
   };
   const openCommit = (oid: string) => {
     selectCodeCommit(oid);
-    selectTab("code");
-  };
-  const [codeRevealRequest, setCodeRevealRequest] = useState<{
-    readonly path: string;
-    readonly nonce: number;
-  } | null>(null);
-  const openFileInCode = (path: string) => {
-    selectCodeCommit(null);
-    setCodeRevealRequest((previous) => ({ path, nonce: (previous?.nonce ?? 0) + 1 }));
-    void loadCodeTab();
     selectTab("code");
   };
   // Cached activity can predate a linked comment, so a miss waits for one host read. `after` is
@@ -488,6 +466,9 @@ export function PullRequestDetailPanel({
     },
     code: (node: HTMLElement | null) => {
       scrollerByTab.current.code = node;
+    },
+    guide: (node: HTMLElement | null) => {
+      scrollerByTab.current.guide = node;
     },
   }));
   const foldRef = useRef<HTMLDivElement | null>(null);
@@ -859,15 +840,6 @@ export function PullRequestDetailPanel({
   const canPrepareWorktree = prepareThread.isAllowed && canOperateThread;
   const canFixFindings = attachTarget !== null || canPrepareWorktree;
   const handoffLabels = pullRequestHandoffLabels(attachTarget !== null);
-  const guideWriter = useReviewGuideWriter({
-    environmentId,
-    reference,
-    title: detail?.title ?? null,
-  });
-  const writeGuide = () => {
-    void guideWriter.write();
-    if (guideWriter.data?.guide == null) selectTab("guide");
-  };
 
   const openThreadWithTask = async (
     projectRef: ReturnType<typeof scopeProjectRef>,
@@ -1085,31 +1057,6 @@ export function PullRequestDetailPanel({
         isDraft: detail.isDraft,
       }),
     });
-  };
-
-  const askAboutGuideStop = (stop: PullRequestReviewGuideStop, index: number, question: string) => {
-    if (!detail) return;
-    void startAsk(
-      `guide-stop:${index}`,
-      buildAskAboutGuideStopHandoff({
-        number: detail.number,
-        title: detail.title,
-        url: detail.url,
-        headBranch: detail.headBranch,
-        baseBranch: detail.baseBranch,
-        state: detail.state,
-        isDraft: detail.isDraft,
-        stop: {
-          index,
-          title: stop.title,
-          summary: stop.summary,
-          attention: stop.attention?.note ?? null,
-          excerpts: stop.excerpts,
-        },
-        question,
-      }),
-      { keepGuide: true },
-    );
   };
 
   const addSelectionToAgent = (
@@ -1490,10 +1437,10 @@ export function PullRequestDetailPanel({
                 canFixFindings={canFixFindings}
                 startFixFindings={startFixFindings}
                 handoffLabels={handoffLabels}
-                canWriteGuide={reviewGuidesEnabled && guideWriter.canWrite}
-                guideRunning={guideWriter.running}
-                guideWritten={guideWriter.data?.guide != null}
-                writeGuide={writeGuide}
+                canWriteGuide={false}
+                guideRunning={false}
+                guideWritten={false}
+                writeGuide={() => selectTab("guide")}
                 pickableEnvironments={pickableEnvironments}
                 actingEnvironmentId={actingEnvironmentId}
                 onActingEnvironmentChange={selectActingEnvironment}
@@ -1704,7 +1651,7 @@ export function PullRequestDetailPanel({
             value={tab}
             onValueChange={selectTab}
             onTabIntent={(item) => {
-              if (item === "code") void loadCodeTab();
+              if (item === "code" || item === "guide") void loadCodeTab();
             }}
           >
             {tab === "summary" ? (
@@ -1884,36 +1831,29 @@ export function PullRequestDetailPanel({
               </div>
             ) : null}
             {mountedTabs.has("guide") ? (
-              <div
-                className={cn("absolute inset-0", tab !== "guide" && "invisible")}
-                // Read by the guide run notifier, which stays quiet for a guide on screen.
-                data-guide-shown={tab === "guide" ? guideKey : undefined}
-              >
-                <PullRequestGuideTab
-                  environmentId={environmentId}
-                  reference={reference}
-                  active={tab === "guide"}
-                  title={detail.title}
-                  workspaceRoot={detail.workspaceRoot}
-                  canComment={
-                    detail.capabilities.review.inlineComment && detail.viewerPermissions.comment
+              <div className={cn("absolute inset-0", tab !== "guide" && "invisible")}>
+                <Suspense
+                  fallback={
+                    <DiffPanelLoadingState label={`Loading ${terminology.singular} diff...`} />
                   }
-                  rangeComments={detail.capabilities.review.rangeComment === true}
-                  completionScope={pullRequestCompletionScope(detail, environmentId, reference)}
-                  onAskAboutLines={(comment, request) =>
-                    addSelectionToAgent({ comment, request }, { keepGuide: true })
-                  }
-                  onAskAboutStop={askAboutGuideStop}
-                  onFinishReview={
-                    detail.capabilities.review.verdicts.some((verdict) =>
-                      detail.viewerPermissions.verdicts.includes(verdict),
-                    )
-                      ? () => setOpenReviewRequest((count) => count + 1)
-                      : null
-                  }
-                  onOpenFile={openFileInCode}
-                  onTourShown={onGuideShown}
-                />
+                >
+                  <PullRequestCodeTab
+                    guideMode
+                    scrollerRef={scrollerRefs.guide}
+                    onAddToAgentSelection={addSelectionToAgent}
+                    environmentId={environmentId}
+                    reference={reference}
+                    detail={detail}
+                    selectedCommitOid={null}
+                    onSelectedCommitChange={selectCodeCommit}
+                    pendingFinding={handoff}
+                    fixFindingLabel={handoffLabels.fixFinding}
+                    {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
+                    onRefresh={refreshDetail}
+                    refreshToken={refreshToken}
+                    backgroundRefreshToken={turnRefresh ?? 0}
+                  />
+                </Suspense>
               </div>
             ) : null}
             {mountedTabs.has("timeline") ? (
@@ -1965,7 +1905,6 @@ export function PullRequestDetailPanel({
                     onRefresh={refreshDetail}
                     refreshToken={refreshToken}
                     backgroundRefreshToken={turnRefresh ?? 0}
-                    revealRequest={codeRevealRequest}
                     revealUrl={tab === "code" ? revealUrl : undefined}
                     onRevealSettled={settleReveal}
                   />
@@ -1993,7 +1932,6 @@ export function PullRequestDetailPanel({
             onCommentAction={performCommentAction}
             onCommented={refreshDetail}
             onReviewSubmitted={refreshDetail}
-            openReviewRequest={openReviewRequest}
           />
         </div>
       ) : null}

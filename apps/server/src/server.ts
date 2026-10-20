@@ -55,6 +55,7 @@ import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewG
 import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
 import * as SpriteHost from "./sprite/SpriteHost.ts";
 import * as SpriteService from "./sprite/SpriteService.ts";
+import * as DiffGuideService from "./diffGuide/DiffGuideService.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as DelegatedTaskAnalytics from "./telemetry/DelegatedTaskAnalytics.ts";
@@ -825,6 +826,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ThreadLinearIssues.layer),
   // Sprites this machine's `sprite` CLI can reach, and, on a sprite, keeping it awake for agents.
   Layer.provide(Layer.mergeAll(SpriteService.layer, SpriteHost.layer)),
+  // Diff guides read pull request diffs through the same service, so it comes after them too.
+  Layer.provide(DiffGuideService.layer),
   // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
   Layer.provide(layerPullRequestService),
   // The same activity instance RunExecutionService reports to, by layer memoization.

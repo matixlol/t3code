@@ -249,6 +249,7 @@ import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewG
 import * as ThreadLinearIssues from "./linear/ThreadLinearIssues.ts";
 import * as SpriteHost from "./sprite/SpriteHost.ts";
 import * as SpriteService from "./sprite/SpriteService.ts";
+import * as DiffGuideService from "./diffGuide/DiffGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1457,6 +1458,7 @@ export const layerWsRpc = (
       const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
       const sprites = yield* SpriteService.SpriteService;
       const spriteHost = yield* SpriteHost.SpriteHost;
+      const diffGuides = yield* DiffGuideService.DiffGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
       const deviceHostContext =
@@ -2838,6 +2840,9 @@ export const layerWsRpc = (
           }
         },
         [WS_METHODS.spriteUsage]: () => spriteHost.usage,
+        [WS_METHODS.diffGuideGenerate]: (input) => diffGuides.generate(input),
+        [WS_METHODS.diffGuideStatus]: () => diffGuides.status,
+        [WS_METHODS.diffGuideSetApiKey]: (input) => diffGuides.setApiKey(input.apiKey),
         [WS_METHODS.pullRequestsThreadComments]: (input) =>
           withPullRequestViewer(input, pullRequests.threadComments(input)),
         [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
@@ -3562,6 +3567,7 @@ export const layer = Layer.unwrap(
     const linearIssues = yield* ThreadLinearIssues.ThreadLinearIssues;
     const sprites = yield* SpriteService.SpriteService;
     const spriteHost = yield* SpriteHost.SpriteHost;
+    const diffGuides = yield* DiffGuideService.DiffGuideService;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3654,6 +3660,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(ThreadLinearIssues.ThreadLinearIssues, linearIssues)),
               Layer.provide(Layer.succeed(SpriteService.SpriteService, sprites)),
               Layer.provide(Layer.succeed(SpriteHost.SpriteHost, spriteHost)),
+              Layer.provide(Layer.succeed(DiffGuideService.DiffGuideService, diffGuides)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

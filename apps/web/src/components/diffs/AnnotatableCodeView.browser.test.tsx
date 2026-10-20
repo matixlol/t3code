@@ -20,6 +20,7 @@ type ViewerProps = Omit<ComponentProps<typeof StyledDiffCodeView<unknown>>, "opt
 };
 
 // Replace only the virtualized viewer; comment editing and submission use the real components.
+vi.mock("../diffGuide/DiffGuideDocument", () => ({ DiffGuideDocument: () => null }));
 vi.mock("./StyledDiffCodeView", () => ({
   StyledDiffCodeView: (props: ViewerProps) =>
     props.items

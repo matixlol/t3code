@@ -16,6 +16,8 @@ export interface PullRequestFilesViewedView {
   readonly isViewed: (path: string) => boolean;
   readonly isStale: (path: string) => boolean;
   readonly setViewed: (path: string, viewed: boolean) => void;
+  /** The host has answered at least once, so an unticked box means unticked, not unknown. */
+  readonly loaded: boolean;
   readonly truncated: boolean;
   readonly error: string | null;
   readonly refresh: () => void;
@@ -48,6 +50,7 @@ export function usePullRequestFilesViewed(options: {
     isViewed: (path: string) => isFileViewed(path, states, overlay),
     isStale: (path: string) => !overlay.has(path) && isStaleViewedState(states?.get(path)),
     setViewed: scope.setViewed,
+    loaded: query.data !== null && query.data !== undefined,
     truncated: query.data?.truncated === true,
     error: query.error,
     refresh: query.refresh,

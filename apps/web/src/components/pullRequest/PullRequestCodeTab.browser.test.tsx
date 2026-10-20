@@ -86,6 +86,7 @@ vi.mock(import("./usePullRequestFilesViewed"), async () => {
         isViewed: (path: string) => viewedPaths?.has(path) === true,
         isStale: () => false,
         setViewed: () => {},
+        loaded: viewedPaths !== null,
         truncated: false,
         error: null,
         refresh: () => {},

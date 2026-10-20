@@ -37,6 +37,24 @@ const state = vi.hoisted(() => ({
   commits: null as unknown as ResultAtom<ReviewBranchCommitsResult>,
 }));
 
+vi.mock("./diffGuide/DiffGuideViews", () => ({
+  DiffGuideOutline: () => null,
+  DiffGuideSectionText: () => null,
+  DiffGuideSummary: () => null,
+  DiffGuideViewSwitch: () => null,
+}));
+vi.mock("./diffGuide/useDiffGuide", () => ({
+  useDiffGuideView: () => ["diff", () => {}],
+  useDiffGuide: () => ({
+    guide: null,
+    cached: false,
+    isPending: false,
+    error: null,
+    notConfigured: false,
+    retry: () => {},
+    regenerate: () => {},
+  }),
+}));
 vi.mock("~/state/server", () => ({
   serverEnvironment: { configValueAtom: () => state.config },
 }));

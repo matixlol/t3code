@@ -50,6 +50,15 @@ import {
 
 import { observeIntersection } from "~/lib/observeIntersection";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { DiffGuideDocument } from "../diffGuide/DiffGuideDocument";
+import type { DiffViewerHandle } from "../diffGuide/DiffGuideViewer";
+import {
+  DiffGuideOutline,
+  DiffGuideSectionText,
+  DiffGuideSummary,
+} from "../diffGuide/DiffGuideViews";
+import { type DiffGuideGroup, groupByDiffGuide } from "../diffGuide/diffGuideOrder";
+import { useDiffGuide } from "../diffGuide/useDiffGuide";
 import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
 import { useRenderedAppearance } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
@@ -356,6 +365,7 @@ function PullRequestCodeTab({
   revealRequest = null,
   revealUrl,
   onRevealSettled,
+  guideMode = false,
 }: {
   scrollerRef: (node: HTMLDivElement | null) => void;
   environmentId: EnvironmentId;
@@ -376,6 +386,11 @@ function PullRequestCodeTab({
   revealUrl?: string | undefined;
   onRevealSettled?: ((revealUrl: string) => void) | undefined;
   revealRequest?: { readonly path: string; readonly nonce: number } | null;
+  /**
+   * Mode's Guide tab: the whole change ordered by the guide's sections, each section's title and
+   * explanation above its first file, or beside its files when the panel is wide.
+   */
+  guideMode?: boolean;
 }) {
   const resolvedTheme = useRenderedAppearance();
   // Initialize the shared tokenizer and workers while the diff request is still pending.
@@ -391,7 +406,8 @@ function PullRequestCodeTab({
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
   const effectiveFoldOverride =
-    foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
+    // A guide is read top to bottom, so its files start open and fold as they are marked viewed.
+    foldOverride ?? (settings.diffFilesCollapsed && !guideMode ? "folded" : "expanded");
   const diffLayout = settings.diffLayout;
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
@@ -423,6 +439,11 @@ function PullRequestCodeTab({
       ? selectedCommitOid
       : null;
   const scopeKey = JSON.stringify([environmentId, referenceKey, commit]);
+  const guide = useDiffGuide({
+    environmentId,
+    target: { _tag: "PullRequest", reference, commitOid: null },
+    open: guideMode,
+  });
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
   // survive the switch and attach its comment to whichever one is on screen when it is sent.
   const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
@@ -766,6 +787,11 @@ function PullRequestCodeTab({
     },
   );
   const fileKeys = items.map((item) => item.id);
+  // The Guide tab lays the same items out by section, so comments, folding and find work as in
+  // Code.
+  const guideGroups = guideMode
+    ? groupByDiffGuide(items, guide.guide, (item) => resolveFileDiffPath(item.fileDiff))
+    : [];
   const collapsedFileKeys = new Set(
     items.filter((item) => item.collapsed === true).map((item) => item.id),
   );
@@ -816,11 +842,17 @@ function PullRequestCodeTab({
       range.reduce((next, file) => withFileDiffFold(next, file.fileKey, viewed), current),
     );
   };
+  // In the guide, ticking a file off moves on to the next one, as Linear's does.
+  const [guideViewer, setGuideViewer] = useState<DiffViewerHandle | null>(null);
+  const markFileViewed = (fileKey: string, viewed: boolean, extendRange: boolean) => {
+    setFileViewed(fileKey, viewed, extendRange);
+    if (guideMode && viewed) guideViewer?.revealAfterFile?.(fileKey);
+  };
   const fileViewedToggle = {
     enabled: filesViewedEnabled,
     isViewed: isFileViewed,
     isStale: isFileViewedStale,
-    setFileViewed,
+    setFileViewed: markFileViewed,
   };
 
   const revealFile = (path: string, range?: SelectedLineRange) => {
@@ -1133,7 +1165,7 @@ function PullRequestCodeTab({
   const toolbar = (
     <div className="@container flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-4 text-xs text-muted-foreground">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        {orderedCommits.length > 0 ? (
+        {orderedCommits.length > 0 && !guideMode ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button size="xs" variant="secondary" />}
@@ -1446,6 +1478,41 @@ function PullRequestCodeTab({
       </div>
     </div>
   );
+  const renderGuideSummary = () => (
+    <DiffGuideSummary state={guide} environmentId={environmentId} cwd={detail.workspaceRoot} />
+  );
+  const renderGuideSection = (group: DiffGuideGroup<CodeViewDiffItem<ReviewAnnotationGroup>>) => (
+    <DiffGuideSectionText
+      number={group.number}
+      total={guide.guide?.sections.length ?? 0}
+      section={group.section}
+      paths={group.items.map((item) => resolveFileDiffPath(item.fileDiff))}
+      environmentId={environmentId}
+      cwd={detail.workspaceRoot}
+      onSelectFile={revealFile}
+      review={
+        filesViewedEnabled
+          ? {
+              isViewed: isFileViewed,
+              isStale: isFileViewedStale,
+              // Each file folds as it is ticked off, exactly as its own box would.
+              setSectionViewed: (viewed) => {
+                for (const item of group.items) setFileViewed(item.id, viewed, false);
+                const last = group.items.at(-1);
+                if (viewed && last !== undefined) guideViewer?.revealAfterFile?.(last.id);
+              },
+            }
+          : undefined
+      }
+    />
+  );
+  // The guide orders every file of the change, so its tab reads the whole diff up front rather
+  // than a slice at a time as the reader scrolls.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pages through the whole diff for the guide, which needs every file to order them
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Paging forward sets the slice cursor.
+    if (guideMode && canLoadNextSlice) loadNextSlice();
+  }, [guideMode, canLoadNextSlice, loadNextSlice]);
   // A file not loaded yet pages forward each time a slice arrives; once loaded, the viewer
   // positions it when it renders it.
   const answerReveal = useEffectEvent(() => {
@@ -1641,23 +1708,53 @@ function PullRequestCodeTab({
         >
           {/* The viewer must own its scroll element to position virtual rows within it. */}
           <FileViewedToggleContext value={fileViewedToggle}>
-            <StyledDiffCodeView<ReviewAnnotationGroup>
-              className="@container h-full overflow-auto [scrollbar-gutter:stable]"
-              containerRef={scrollerRef}
-              viewerRef={codeViewReveal.attach}
-              items={items}
-              selectedLines={selectedLines}
-              onSelectedLinesChange={setSelectedLines}
-              options={diffViewOptions}
-              renderCodeViewFooter={renderCodeViewFooter}
-              renderHeaderPrefix={renderHeaderPrefix}
-              renderHeaderMetadata={renderHeaderMetadata}
-              renderAnnotation={renderAnnotation}
-              unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
-            />
+            {guideMode ? (
+              <DiffGuideDocument<ReviewAnnotationGroup>
+                className="h-full overflow-auto [scrollbar-gutter:stable]"
+                containerRef={scrollerRef}
+                viewerRef={setGuideViewer}
+                groups={guideGroups}
+                renderSection={renderGuideSection}
+                selectedLines={selectedLines}
+                onSelectedLinesChange={setSelectedLines}
+                options={diffViewOptions}
+                renderCodeViewFooter={renderCodeViewFooter}
+                renderCodeViewHeader={renderGuideSummary}
+                renderHeaderPrefix={renderHeaderPrefix}
+                renderHeaderMetadata={renderHeaderMetadata}
+                renderAnnotation={renderAnnotation}
+                unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+              />
+            ) : (
+              <StyledDiffCodeView<ReviewAnnotationGroup>
+                className="@container h-full overflow-auto [scrollbar-gutter:stable]"
+                containerRef={scrollerRef}
+                viewerRef={codeViewReveal.attach}
+                items={items}
+                selectedLines={selectedLines}
+                onSelectedLinesChange={setSelectedLines}
+                options={diffViewOptions}
+                renderCodeViewFooter={renderCodeViewFooter}
+                renderHeaderPrefix={renderHeaderPrefix}
+                renderHeaderMetadata={renderHeaderMetadata}
+                renderAnnotation={renderAnnotation}
+                unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+              />
+            )}
           </FileViewedToggleContext>
         </div>
-        {fileTreeOpen ? (
+        {guideMode && fileTreeOpen ? (
+          <FileExplorerPane
+            resizable
+            storageKey="t3code:diff-file-tree-width"
+            defaultWidth={288}
+            defaultWidthFraction={0.4}
+            minWidth={192}
+            resizeLabel="Resize guide outline"
+          >
+            <DiffGuideOutline state={guide} onSelectFile={revealFile} />
+          </FileExplorerPane>
+        ) : fileTreeOpen ? (
           <FileExplorerPane
             resizable
             storageKey="t3code:diff-file-tree-width"
