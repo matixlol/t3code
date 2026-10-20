@@ -23,6 +23,9 @@ stable ("Beta") release. Fork changes are kept small and in separate commits so 
   Linear issue a thread works on with the `link_linear_issue` MCP tool (URL and title, no Linear auth),
   and it shows beside the thread's pull requests. Stored in `mode_thread_linear_issues`, a table the
   server creates itself in the shared database; T3 Code never reads it.
+- **Window title** (`apps/web/src/hooks/useThreadWindowTitle.ts`): the window is titled after the
+  thread on screen (Linear issues, title, branch, project, worktree, last prompt) so time trackers
+  like Timing can tell threads apart.
 - **No database migrations.** Never add one in the fork: upstream's next migration would reuse the id
   and be skipped silently. Diff guides cache on disk under `~/.t3/caches/diff-guides` instead, and Mode-only
   tables are created with `CREATE TABLE IF NOT EXISTS` under a `mode_` prefix.
