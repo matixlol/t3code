@@ -30,3 +30,19 @@ export function resolveDesktopStateDir(input: {
     input.isDevelopment && Option.isNone(normalizeConfiguredBaseDir(input.t3Home));
   return input.joinPath(input.baseDir, useDevSubdir ? "dev" : "userdata");
 }
+
+/**
+ * Where Mode keeps what it must not share with T3 Code in their common default home: files
+ * encrypted with its own keychain key and its CLI launcher. A configured T3 home is Mode's alone.
+ */
+export function resolveModeStateDir(input: {
+  readonly homeDirectory: string;
+  readonly stateDir: string;
+  readonly isDevelopment: boolean;
+  readonly joinPath: JoinPath;
+  readonly t3Home: Option.Option<string>;
+}): string {
+  return Option.isSome(normalizeConfiguredBaseDir(input.t3Home))
+    ? input.stateDir
+    : input.joinPath(input.homeDirectory, ".mode", input.isDevelopment ? "dev" : "userdata");
+}
