@@ -162,7 +162,7 @@ describe("DesktopConnectionCatalogStore", () => {
             lastConnectedAt: null,
           },
         ];
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(
           environment.savedEnvironmentRegistryPath,
           yield* encodeLegacySavedEnvironments({
@@ -247,8 +247,8 @@ describe("DesktopConnectionCatalogStore", () => {
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const fileSystem = yield* FileSystem.FileSystem;
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        const catalogPath = path.join(environment.modeStateDir, "connection-catalog.json");
+        yield* fileSystem.makeDirectory(environment.modeStateDir, { recursive: true });
         yield* fileSystem.writeFileString(catalogPath, "{not-json");
 
         const error = yield* store.get.pipe(Effect.flip);

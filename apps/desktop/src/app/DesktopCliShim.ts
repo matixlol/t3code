@@ -114,7 +114,7 @@ export const renderCliShim = (input: {
 
 export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   environment.path.join(
-    environment.baseDir,
+    environment.path.dirname(environment.modeStateDir),
     "bin",
     environment.platform === "win32" ? "t3.cmd" : "t3",
   );

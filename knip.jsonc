@@ -27,6 +27,8 @@
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        // Mode's build, install and sprite-server publishing, run by hand.
+        "mode/*.ts",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
