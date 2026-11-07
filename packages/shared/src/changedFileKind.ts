@@ -73,6 +73,49 @@ export function isTestChangedFile(path: string): boolean {
   return kind === "tests" || kind === "mocks";
 }
 
+/** Tests, their support, and generated output: what a realistic count of a change leaves out. */
+export function isSupportingChangedFile(path: string): boolean {
+  const kind = classifyChangedFile(path);
+  return kind === "tests" || kind === "mocks" || kind === "generated";
+}
+
+type ChangeStat = { additions: number; deletions: number };
+
+export function changeBreakdownOf(
+  files: Iterable<ChangeStat & { readonly path: string }>,
+): Record<ChangedFileKind, ChangeStat> {
+  const empty = () => ({ additions: 0, deletions: 0 });
+  const breakdown = {
+    code: empty(),
+    tests: empty(),
+    mocks: empty(),
+    generated: empty(),
+    docs: empty(),
+  };
+  for (const file of files) {
+    const bucket = breakdown[classifyChangedFile(file.path)];
+    bucket.additions += file.additions;
+    bucket.deletions += file.deletions;
+  }
+  return breakdown;
+}
+
+/** The authored part of a change (code and docs), or all of it when that part is empty. */
+export function authoredChangeStat(breakdown: Record<ChangedFileKind, ChangeStat>): ChangeStat {
+  const authored = {
+    additions: breakdown.code.additions + breakdown.docs.additions,
+    deletions: breakdown.code.deletions + breakdown.docs.deletions,
+  };
+  if (authored.additions > 0 || authored.deletions > 0) return authored;
+  return Object.values(breakdown).reduce(
+    (total, stat) => ({
+      additions: total.additions + stat.additions,
+      deletions: total.deletions + stat.deletions,
+    }),
+    { additions: 0, deletions: 0 },
+  );
+}
+
 export function classifyChangedFile(path: string): ChangedFileKind {
   const segments = path.replaceAll("\\", "/").split("/");
   const name = segments.pop() ?? "";

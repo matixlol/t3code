@@ -12,6 +12,8 @@ import {
   FolderIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { authoredChangeStat, changeBreakdownOf } from "@t3tools/shared/changedFileKind";
+import { ChangeBreakdownTooltip } from "../diffs/ChangeBreakdown";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { Button } from "../ui/button";
@@ -53,6 +55,8 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   } = props;
   const syncTimelineLayout = useSyncLayout();
   const hiddenFileCount = totals.count - files.length;
+  // The split needs every file; a card holding a prefix shows the plain total.
+  const breakdown = hiddenFileCount === 0 ? changeBreakdownOf(files) : null;
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
   return (
@@ -68,14 +72,23 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           <span>
             {totals.count.toLocaleString()} changed file{totals.count === 1 ? "" : "s"}
           </span>
-          {hasNonZeroStat(totals) && (
-            <DiffStatLabel
-              additions={totals.additions}
-              deletions={totals.deletions}
-              layout="inline"
-              className="text-xs leading-4"
-            />
-          )}
+          {hasNonZeroStat(totals) &&
+            (breakdown ? (
+              <ChangeBreakdownTooltip breakdown={breakdown}>
+                <DiffStatLabel
+                  {...authoredChangeStat(breakdown)}
+                  layout="inline"
+                  className="text-xs leading-4"
+                />
+              </ChangeBreakdownTooltip>
+            ) : (
+              <DiffStatLabel
+                additions={totals.additions}
+                deletions={totals.deletions}
+                layout="inline"
+                className="text-xs leading-4"
+              />
+            ))}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {hasDirectories && (

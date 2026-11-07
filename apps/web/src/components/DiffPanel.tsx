@@ -41,8 +41,13 @@ import {
   useDiffPanelStore,
 } from "../diffPanelStore";
 import { useLocalStorage } from "../hooks/useLocalStorage";
-import { isTestChangedFile } from "@t3tools/shared/changedFileKind";
-import { useHideTestFiles } from "./diffs/useHideTestFiles";
+import {
+  authoredChangeStat,
+  changeBreakdownOf,
+  isSupportingChangedFile,
+} from "@t3tools/shared/changedFileKind";
+import { ChangeBreakdownTooltip } from "./diffs/ChangeBreakdown";
+import { useHideSupportingFiles } from "./diffs/useHideSupportingFiles";
 import { useRenderedAppearance } from "../hooks/useTheme";
 import { useStableCallback } from "../hooks/useStableCallback";
 import {
@@ -246,7 +251,7 @@ export default function DiffPanel({
     false,
     Schema.Boolean,
   );
-  const [hideTestFiles, setHideTestFiles] = useHideTestFiles();
+  const [hideSupportingFiles, setHideSupportingFiles] = useHideSupportingFiles();
   const [diffView, setDiffView] = useDiffGuideView();
   const [baseRefQuery, setBaseRefQuery] = useState("");
   // The open commit menu keeps the list it opened with, so rows do not move under the pointer.
@@ -563,16 +568,8 @@ export default function DiffPanel({
       ? Math.max(0, recordedToolCallFileCount - renderablePatch.files.length)
       : 0;
   const fileStats = new Map(lazySource?.files?.map((file) => [file.path, file]));
-  const sourceLineStat =
-    isGitSelection && selectedGitSource?.files
-      ? selectedGitSource.files.reduce(
-          (total, file) => ({
-            additions: total.additions + file.additions,
-            deletions: total.deletions + file.deletions,
-          }),
-          { additions: 0, deletions: 0 },
-        )
-      : null;
+  const sourceFileStats =
+    isGitSelection && selectedGitSource?.files ? selectedGitSource.files : null;
   const currentLoadDiffFiles =
     isGitSelection && activeThread && preview && selectedGitSource && canReadFiles
       ? createGitDiffFileContentsLoader(getDiffFileContents, {
@@ -687,13 +684,15 @@ export default function DiffPanel({
     return { ...entry, fileKey: `${pathKey}:${occurrence}` };
   });
   const diffFileKeys = renderableFileEntries.map((file) => file.fileKey);
-  const testFileCount = renderableFiles.filter((file) =>
-    isTestChangedFile(resolveFileDiffPath(file)),
+  const supportingFileCount = renderableFiles.filter((file) =>
+    isSupportingChangedFile(resolveFileDiffPath(file)),
   ).length;
+  // A guide places every file in a section, so it shows them all.
+  const hidesSupportingFiles = hideSupportingFiles && !guideMode;
   // Hiding is display-only: lazy loading indexes into the full list. A requested file stays visible.
   const isFileShown = (file: FileDiffMetadata) => {
     const path = resolveFileDiffPath(file);
-    return !hideTestFiles || path === selectedFilePath || !isTestChangedFile(path);
+    return !hidesSupportingFiles || path === selectedFilePath || !isSupportingChangedFile(path);
   };
   const shownFileEntries = renderableFileEntries.filter(({ fileDiff }) => isFileShown(fileDiff));
   const shownFileKeys = shownFileEntries.map((file) => file.fileKey);
@@ -736,7 +735,14 @@ export default function DiffPanel({
     (file) => file.cacheKey?.endsWith(":pending") && isFileShown(file),
   );
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(shownFileKeys, collapsedDiffFileKeys);
-  const diffLineStat = sourceLineStat ?? getDiffLineStat(renderableFiles);
+  const diffBreakdown = changeBreakdownOf(
+    sourceFileStats ??
+      renderableFiles.map((file) => ({
+        path: resolveFileDiffPath(file),
+        ...getDiffLineStat([file]),
+      })),
+  );
+  const diffLineStat = authoredChangeStat(diffBreakdown);
   const fileTreeEntries = diffFileTreeEntries(renderableFiles.filter(isFileShown));
   const codeViewReveal = useCodeViewFileReveal();
   const revealDiffFile = (filePath: string) => {
@@ -1185,12 +1191,14 @@ export default function DiffPanel({
         )}
       >
         {codeViewFiles.length > 0 || (isGitSelection && selectedGitSource?.files?.length) ? (
-          <DiffStatLabel
-            additions={diffLineStat.additions}
-            deletions={diffLineStat.deletions}
-            className="mr-1 text-2xs"
-            layout="inline"
-          />
+          <ChangeBreakdownTooltip breakdown={diffBreakdown}>
+            <DiffStatLabel
+              additions={diffLineStat.additions}
+              deletions={diffLineStat.deletions}
+              className="mr-1 text-2xs"
+              layout="inline"
+            />
+          </ChangeBreakdownTooltip>
         ) : null}
         {canRefreshGitDiff && (
           <Tooltip>
@@ -1300,25 +1308,25 @@ export default function DiffPanel({
             {diffIgnoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
           </TooltipPopup>
         </Tooltip>
-        {testFileCount > 0 && (
+        {supportingFileCount > 0 && !guideMode && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Toggle
-                  aria-label="Hide test files"
+                  aria-label="Hide tests and generated files"
                   variant="ghost"
                   size="sm"
-                  pressed={hideTestFiles}
-                  onPressedChange={(pressed) => setHideTestFiles(Boolean(pressed))}
+                  pressed={hideSupportingFiles}
+                  onPressedChange={(pressed) => setHideSupportingFiles(Boolean(pressed))}
                 />
               }
             >
               <FlaskConicalOffIcon className="size-3.5" />
             </TooltipTrigger>
             <TooltipPopup side="top">
-              {hideTestFiles
-                ? `Show ${testFileCount} hidden test ${testFileCount === 1 ? "file" : "files"}`
-                : "Hide test files"}
+              {hideSupportingFiles
+                ? `Show ${supportingFileCount} hidden test and generated ${supportingFileCount === 1 ? "file" : "files"}`
+                : "Hide tests and generated files"}
             </TooltipPopup>
           </Tooltip>
         )}
