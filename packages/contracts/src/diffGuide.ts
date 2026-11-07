@@ -35,6 +35,8 @@ export const DiffGuideTarget = Schema.Union([
     reference: PullRequestRef,
     /** A single commit's diff instead of the whole change. */
     commitOid: Schema.NullOr(TrimmedNonEmptyString),
+    /** The head the view shows, so a push asks again; the server rereads the diff. */
+    revision: Schema.optionalKey(TrimmedNonEmptyString),
   }),
   Schema.TaggedStruct("Checkpoint", {
     threadId: ThreadId,

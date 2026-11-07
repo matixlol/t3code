@@ -441,7 +441,12 @@ function PullRequestCodeTab({
   const scopeKey = JSON.stringify([environmentId, referenceKey, commit]);
   const guide = useDiffGuide({
     environmentId,
-    target: { _tag: "PullRequest", reference, commitOid: null },
+    target: {
+      _tag: "PullRequest",
+      reference,
+      commitOid: null,
+      revision: detail.headSha ?? detail.updatedAt,
+    },
     open: guideMode,
   });
   // The panel keeps this mounted across pull requests, so an open composer would otherwise
