@@ -27,6 +27,8 @@ const GENERATED_FILES = new Set([
 const GENERATED_NAME =
   /(\.generated\.|\.gen\.|\.g\.dart$|\.pb\.go$|_pb2(_grpc)?\.py$|\.pb\.(cc|h)$|\.min\.(js|css)$|\.(js|css)\.map$)/;
 const GENERATED_DIRS = new Set(["__generated__", "_generated", "generated"]);
+// Drizzle Kit writes a schema snapshot and a journal under `meta/` beside each migration.
+const GENERATED_META_NAME = /^(\d+_snapshot|_journal)\.json$/;
 
 const MOCK_NAME =
   /(\.snap$|\.(mocks?|fixtures?|stubs?|fakes?)\.[^.]+$|^(mocks?|fixtures?|stubs?|fakes?)([-_.A-Z]|$))/;
@@ -121,7 +123,12 @@ export function classifyChangedFile(path: string): ChangedFileKind {
   const name = segments.pop() ?? "";
   const dirs = segments.map((segment) => segment.toLowerCase());
   const inDir = (set: ReadonlySet<string>) => dirs.some((dir) => set.has(dir));
-  if (GENERATED_FILES.has(name.toLowerCase()) || GENERATED_NAME.test(name) || inDir(GENERATED_DIRS))
+  if (
+    GENERATED_FILES.has(name.toLowerCase()) ||
+    GENERATED_NAME.test(name) ||
+    inDir(GENERATED_DIRS) ||
+    (dirs.at(-1) === "meta" && GENERATED_META_NAME.test(name))
+  )
     return "generated";
   if (MOCK_NAME.test(name) || inDir(MOCK_DIRS)) return "mocks";
   if (TEST_NAME.test(name) || CLASS_TEST_NAME.test(name) || inDir(TEST_DIRS)) return "tests";
