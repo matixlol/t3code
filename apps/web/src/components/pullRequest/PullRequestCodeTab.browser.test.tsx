@@ -273,7 +273,7 @@ it("pages forward to a file asked for that is not loaded yet, then scrolls to it
   const container = pagedContainer();
   await using screen = await render(tab(0), { container });
   await expect.element(screen.getByText("early-0.ts", { exact: true }).first()).toBeVisible();
-  await screen.getByRole("button", { name: "Hide test files" }).click();
+  await screen.getByRole("button", { name: "Hide tests and generated files" }).click();
 
   const url = `${detail.url}/files#diff-${bytesToHex(sha256(new TextEncoder().encode("late.test.ts")))}R4-R5`;
   const settled = vi.fn();

@@ -1,27 +1,19 @@
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
-import type { EnvironmentId, PullRequestChangeBreakdown, PullRequestRef } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestRef } from "@t3tools/contracts";
+import { authoredChangeStat } from "@t3tools/shared/changedFileKind";
 import { useState } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 
+import { ChangeBreakdownGrid } from "../diffs/ChangeBreakdown";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestDiffStat } from "./pullRequestPresentation";
-
-const KIND_LABELS = {
-  code: "Code",
-  tests: "Tests",
-  mocks: "Mocks",
-  generated: "Generated",
-  docs: "Docs",
-} satisfies Record<keyof NonNullable<PullRequestChangeBreakdown>, string>;
-
-type DiffTotals = { additions: number; deletions: number };
 
 /**
  * The pull request's diff stat, with a hover split into code, tests, mocks, and generated files.
  * In lists the split is read on first pointer or focus intent, so rows nobody hovers cost the
- * host nothing. A view of one pull request passes `eager` so the split is ready before the hover.
+ * host nothing, and the stat stays the total. A view of one pull request passes `eager`: the split
+ * is ready before the hover, and the stat counts only the authored code and docs.
  */
 export function PullRequestChangeBreakdownStat({
   environmentId,
@@ -44,6 +36,7 @@ export function PullRequestChangeBreakdownStat({
   );
   const breakdown = query.data;
   if (additions === 0 && deletions === 0) return null;
+  const shown = eager && breakdown ? authoredChangeStat(breakdown) : { additions, deletions };
   return (
     <Tooltip>
       <TooltipTrigger
@@ -52,8 +45,8 @@ export function PullRequestChangeBreakdownStat({
         render={
           <span className="inline-flex">
             <PullRequestDiffStat
-              additions={additions}
-              deletions={deletions}
+              additions={shown.additions}
+              deletions={shown.deletions}
               className={className}
             />
           </span>
@@ -91,47 +84,5 @@ export function PullRequestChangeBreakdownRows({
     <div className={className}>
       <ChangeBreakdownGrid breakdown={query.data} />
     </div>
-  );
-}
-
-function ChangeBreakdownGrid({
-  breakdown,
-  total,
-}: {
-  breakdown: NonNullable<PullRequestChangeBreakdown>;
-  total?: DiffTotals;
-}) {
-  return (
-    <div className="grid grid-cols-[auto_auto_auto] justify-start gap-x-4 gap-y-1 py-0.5 font-mono tabular-nums">
-      {(Object.keys(KIND_LABELS) as Array<keyof typeof KIND_LABELS>).map((kind) => {
-        const { additions, deletions } = breakdown[kind];
-        return additions === 0 && deletions === 0 ? null : (
-          <BreakdownRow
-            key={kind}
-            label={KIND_LABELS[kind]}
-            additions={additions}
-            deletions={deletions}
-          />
-        );
-      })}
-      {total ? (
-        <>
-          <div className="col-span-3 border-t border-border" />
-          <BreakdownRow label="Total" additions={total.additions} deletions={total.deletions} />
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function BreakdownRow({ label, additions, deletions }: DiffTotals & { label: string }) {
-  return (
-    <>
-      <span className="font-sans">{label}</span>
-      <span className="text-right text-diff-addition-foreground">
-        +{formatDiffCount(additions)}
-      </span>
-      <span className="text-right text-diff-deletion">-{formatDiffCount(deletions)}</span>
-    </>
   );
 }
