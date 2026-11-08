@@ -321,6 +321,24 @@ const isGraphQlClientError = (error: unknown): error is GraphQLClientError.Graph
 
 const { isNotFoundOnly } = GitHubGraphQlClient;
 
+// A fine-grained token cannot be granted Checks, so GitHub withholds every check run from it.
+const isRefusedCheckRunsOnly = (error: unknown): boolean =>
+  isGraphQlClientError(error) &&
+  error.reason._tag === "ResponseError" &&
+  error.reason.status === 200 &&
+  error.reason.errors.length > 0 &&
+  error.reason.errors.every(
+    ({ path, type }) =>
+      type === "FORBIDDEN" &&
+      path?.length === 10 &&
+      path[0] === "repository" &&
+      path[1] === "pullRequest" &&
+      path[2] === "commits" &&
+      path[6] === "statusCheckRollup" &&
+      path[7] === "contexts" &&
+      path[8] === "nodes",
+  );
+
 const isRefusedRequestedReviewersOnly = (error: unknown): boolean =>
   isGraphQlClientError(error) &&
   error.reason._tag === "ResponseError" &&
@@ -1456,7 +1474,7 @@ export const make = Effect.gen(function* () {
   const getPullRequestDetail: GitHubPullRequestApi["Service"]["getPullRequestDetail"] = (input) => {
     const { owner, name } = parseRepositorySelector(input.repository);
     const operation = "getPullRequestDetail";
-    const read = (requestedReviewers: number) =>
+    const read = (requestedReviewers: number, checks = 100) =>
       client.PullRequestCore({
         owner,
         name,
@@ -1464,13 +1482,25 @@ export const make = Effect.gen(function* () {
         headRef: `refs/pull/${input.number}/head`,
         required: asksRequired(input.host),
         requestedReviewers,
+        checks,
       });
+    // Without check runs the pull request reads as having none, rather than not at all.
+    const coreOf = (result: Parameters<typeof toPullRequestCore>[0], checksWithheld: boolean) => {
+      const core = toPullRequestCore(result);
+      return core === null || !checksWithheld ? core : { ...core, checksTruncated: false };
+    };
     return SourceControlRateLimit.Interactive.pipe(
       Effect.flatMap((allowReserve) =>
         readRequestedReviewers(input, 100, read).pipe(
+          Effect.map((result) => ({ result, checksWithheld: false })),
+          Effect.catchIf(isRefusedCheckRunsOnly, () =>
+            readRequestedReviewers(input, 100, (reviewers) => read(reviewers, 0)).pipe(
+              Effect.map((result) => ({ result, checksWithheld: true })),
+            ),
+          ),
           graphql({ ...input, operation, allowReserve }),
-          Effect.flatMap((result) =>
-            found({ ...input, operation })(toPullRequestCore(result)).pipe(
+          Effect.flatMap(({ result, checksWithheld }) =>
+            found({ ...input, operation })(coreOf(result, checksWithheld)).pipe(
               Effect.filterOrElse(
                 (core) => !core.checksTruncated,
                 (core) =>

@@ -3419,6 +3419,39 @@ layer("GitHubPullRequestApi.layer", (it) => {
     }),
   );
 
+  it.effect("reads a pull request without the check runs a fine-grained token cannot see", () =>
+    Effect.gen(function* () {
+      const refusedCheckRun = (index: number) => ({
+        type: "FORBIDDEN",
+        message: "Resource not accessible by personal access token",
+        path: [
+          "repository",
+          "pullRequest",
+          "commits",
+          "nodes",
+          0,
+          "commit",
+          "statusCheckRollup",
+          "contexts",
+          "nodes",
+          index,
+        ],
+      });
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson({ ...coreResponse(), errors: [refusedCheckRun(0), refusedCheckRun(1)] }),
+          ),
+        ),
+      );
+      mockedExecute.mockReturnValueOnce(Effect.succeed(output(encodeJson(coreResponse()))));
+      const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
+      const detail = yield* cli.getPullRequestDetail(pullRequestInput);
+      expect(variablesOf("PullRequestCore").map((v) => v["checks"])).toEqual([100, 0]);
+      expect(detail.number).toBe(7);
+    }),
+  );
+
   // regression: #19564 only a refused reviewer path is retried; other failures surface as-is
   it.effect.each([
     {
