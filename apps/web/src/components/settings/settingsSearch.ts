@@ -685,6 +685,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "prompt-link-default-project",
+    title: "Links without a repository open in",
+    to: "/settings/general",
+    searchTerms: ["linear start working prompt link default project new thread"],
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/general",

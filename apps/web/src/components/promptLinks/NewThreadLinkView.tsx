@@ -5,6 +5,7 @@ import {
   getCloneDirectoryPath,
 } from "@t3tools/client-runtime/operations/projects";
 import {
+  findPromptLinkDefaultProject,
   findPromptLinkProjects,
   findPromptLinkPullRequestThread,
   pickPromptLinkPullRequestThread,
@@ -28,6 +29,7 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "rea
 
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { isElectron } from "~/env";
+import { useClientSettings } from "~/hooks/useSettings";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { newProjectId } from "~/lib/utils";
@@ -110,6 +112,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const handleNewThread = useNewThreadHandler();
+  const defaultProject = useClientSettings((settings) => settings.promptLinkDefaultProject);
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
@@ -302,7 +305,10 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       setState({ status: "opened" });
       setLaunch({ kind: "thread", thread: pullRequestThread });
     } else if (repository === null) {
-      setLaunch({ kind: "scratch" });
+      const fallback = findPromptLinkDefaultProject(recentProjects(), defaultProject);
+      setLaunch(
+        fallback === undefined ? { kind: "scratch" } : { kind: "draft", project: fallback },
+      );
     } else if (project === undefined) {
       setState({ status: "missing-repository", repository });
       setLaunch({ kind: "settled" });

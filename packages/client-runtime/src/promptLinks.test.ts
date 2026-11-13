@@ -12,6 +12,7 @@ import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  findPromptLinkDefaultProject,
   findPromptLinkProjects,
   findPromptLinkPullRequestThread,
   pickPromptLinkPullRequestThread,
@@ -53,6 +54,28 @@ describe("findPromptLinkProjects", () => {
         (project) => project.id,
       ),
     ).toEqual(["gitcafe", "staging"]);
+  });
+});
+
+describe("findPromptLinkDefaultProject", () => {
+  it("opens the most recent project, the chosen one, or none when the chosen one is gone", () => {
+    const projects = [
+      { environmentId: EnvironmentId.make("laptop"), id: "recent" },
+      { environmentId: EnvironmentId.make("laptop"), id: "chosen" },
+      { environmentId: EnvironmentId.make("vps"), id: "chosen" },
+    ];
+    const pick = (setting: Parameters<typeof findPromptLinkDefaultProject>[1]) =>
+      findPromptLinkDefaultProject(projects, setting);
+    expect(pick({ kind: "none" })).toBeUndefined();
+    expect(pick({ kind: "last-used" })).toBe(projects[0]);
+    const chosen = {
+      environmentId: EnvironmentId.make("vps"),
+      projectId: ProjectId.make("chosen"),
+    };
+    expect(pick({ kind: "project", ...chosen })).toBe(projects[2]);
+    expect(
+      pick({ kind: "project", ...chosen, projectId: ProjectId.make("removed") }),
+    ).toBeUndefined();
   });
 });
 
