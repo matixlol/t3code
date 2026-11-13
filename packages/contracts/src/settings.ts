@@ -390,6 +390,17 @@ export const VoiceTranscriptionDestination = Schema.Union([
 ]);
 export type VoiceTranscriptionDestination = typeof VoiceTranscriptionDestination.Type;
 
+/** Where a prompt link without a repository opens, such as Linear's "Start working in" links. */
+export const PromptLinkDefaultProject = Schema.Union([
+  Schema.Struct({ kind: Schema.Literals(["none", "last-used"]) }),
+  Schema.Struct({
+    kind: Schema.Literal("project"),
+    environmentId: EnvironmentId,
+    projectId: ProjectId,
+  }),
+]);
+export type PromptLinkDefaultProject = typeof PromptLinkDefaultProject.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
@@ -580,6 +591,9 @@ export const ClientSettingsSchema = Schema.Struct({
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   rightPanelSharedWidth: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  promptLinkDefaultProject: PromptLinkDefaultProject.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ kind: "none" as const })),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -2067,5 +2081,6 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
   rightPanelSharedWidth: Schema.optionalKey(Schema.Boolean),
+  promptLinkDefaultProject: Schema.optionalKey(PromptLinkDefaultProject),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

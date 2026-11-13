@@ -34,6 +34,7 @@ import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../..
 import { AboutVersionTitle } from "./AboutVersionTitle";
 import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
+import { PromptLinkDefaultProjectRow } from "./PromptLinkDefaultProjectRow";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -473,6 +474,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.rightPanelSharedWidth !== DEFAULT_UNIFIED_SETTINGS.rightPanelSharedWidth
       ? ["Same panel width in every thread"]
       : []),
+    ...(settings.promptLinkDefaultProject.kind !==
+    DEFAULT_UNIFIED_SETTINGS.promptLinkDefaultProject.kind
+      ? ["Links without a repository open in"]
+      : []),
     ...(settings.environmentIdentificationMode !==
     DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
       ? ["Environment identification"]
@@ -666,6 +671,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       rightPanelSharedWidth: DEFAULT_UNIFIED_SETTINGS.rightPanelSharedWidth,
+      promptLinkDefaultProject: DEFAULT_UNIFIED_SETTINGS.promptLinkDefaultProject,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
@@ -1008,6 +1014,10 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+      </SettingsSection>
+
+      <SettingsSection id="links" title="Links">
+        <PromptLinkDefaultProjectRow />
       </SettingsSection>
 
       <SettingsSection id="display" title="Display">

@@ -2,6 +2,7 @@ import {
   repositoryGroupingKeyOf,
   type EnvironmentId,
   type ModelSelection,
+  type PromptLinkDefaultProject,
   type PullRequestLinkedThreadsResult,
   type RepositoryIdentity,
   type ServerProvider,
@@ -36,6 +37,23 @@ export function findPromptLinkProjects<
       project.repositoryIdentity != null &&
       keys.has(repositoryGroupingKeyOf(project.repositoryIdentity).toLowerCase()),
   );
+}
+
+/** The project a link without a repository opens in; `undefined` opens it without a project. */
+export function findPromptLinkDefaultProject<
+  P extends { readonly environmentId: EnvironmentId; readonly id: string },
+>(projects: ReadonlyArray<P>, setting: PromptLinkDefaultProject): P | undefined {
+  switch (setting.kind) {
+    case "none":
+      return undefined;
+    case "last-used":
+      return projects[0];
+    case "project":
+      return projects.find(
+        (project) =>
+          project.environmentId === setting.environmentId && project.id === setting.projectId,
+      );
+  }
 }
 
 export function findPromptLinkPullRequestThread<
