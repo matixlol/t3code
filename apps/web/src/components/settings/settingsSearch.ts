@@ -369,6 +369,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "right-panel-shared-width",
+    title: "Same panel width in every thread",
+    to: "/settings/appearance",
+    searchTerms: ["right side panel width resize global per thread sticky"],
+  },
+  {
     id: "environment-identification",
     title: "Environment identification",
     to: "/settings/appearance",

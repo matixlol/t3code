@@ -351,6 +351,7 @@ export function AppearanceSettingsPanel() {
         <AdvancedSettings
           targetIds={[
             searchableSetting("panel-animations").id,
+            searchableSetting("right-panel-shared-width").id,
             searchableSetting("environment-identification").id,
             // Environment identification's search result lands on this section.
             "appearance-interface",
@@ -406,6 +407,31 @@ export function AppearanceSettingsPanel() {
                   }
                 />
               ) : null
+            }
+          />
+          <SettingsRow
+            {...searchableSetting("right-panel-shared-width")}
+            description="Keep the right panel at one width across threads instead of remembering it per thread."
+            resetAction={
+              settings.rightPanelSharedWidth !== DEFAULT_UNIFIED_SETTINGS.rightPanelSharedWidth ? (
+                <SettingResetButton
+                  label="shared panel width"
+                  onClick={() =>
+                    updateSettings({
+                      rightPanelSharedWidth: DEFAULT_UNIFIED_SETTINGS.rightPanelSharedWidth,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.rightPanelSharedWidth}
+                onCheckedChange={(checked) =>
+                  updateSettings({ rightPanelSharedWidth: Boolean(checked) })
+                }
+                aria-label="Same panel width in every thread"
+              />
             }
           />
           <SettingsRow
