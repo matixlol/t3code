@@ -60,6 +60,22 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
   }
 }
 
+// Linear's desktop app registers linear:// and accepts the web path unchanged after it.
+const toLinearAppUrl = (externalUrl: string): Option.Option<string> => {
+  const url = new URL(externalUrl);
+  return url.protocol === "https:" &&
+    url.hostname === "linear.app" &&
+    Electron.app.getApplicationNameForProtocol("linear://") !== ""
+    ? Option.some(`linear://${url.pathname.slice(1)}${url.search}${url.hash}`)
+    : Option.none();
+};
+
+const openWithOs = (url: string) =>
+  Electron.shell.openExternal(url).then(
+    () => true,
+    () => false,
+  );
+
 export class ElectronShell extends Context.Service<
   ElectronShell,
   {
@@ -76,10 +92,11 @@ export const make = ElectronShell.of({
       onNone: () => Effect.succeed(false),
       onSome: (externalUrl) =>
         Effect.promise(() =>
-          Electron.shell.openExternal(externalUrl).then(
-            () => true,
-            () => false,
-          ),
+          Option.match(toLinearAppUrl(externalUrl), {
+            onNone: () => openWithOs(externalUrl),
+            onSome: (appUrl) =>
+              openWithOs(appUrl).then((opened) => opened || openWithOs(externalUrl)),
+          }),
         ),
     });
   }),

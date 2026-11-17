@@ -2,12 +2,16 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
+const { openExternalMock, writeTextMock, protocolAppMock } = vi.hoisted(() => ({
   openExternalMock: vi.fn(),
   writeTextMock: vi.fn(),
+  protocolAppMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
+  app: {
+    getApplicationNameForProtocol: protocolAppMock,
+  },
   shell: {
     openExternal: openExternalMock,
   },
@@ -22,7 +26,28 @@ describe("ElectronShell", () => {
   beforeEach(() => {
     openExternalMock.mockReset();
     writeTextMock.mockReset();
+    protocolAppMock.mockReset();
+    protocolAppMock.mockReturnValue("");
   });
+
+  it.effect("opens Linear links in the Linear app when it is installed", () =>
+    Effect.gen(function* () {
+      const webUrl = "https://linear.app/acme/issue/ENG-12/fix-it?x=1#c";
+      const appUrl = "linear://acme/issue/ENG-12/fix-it?x=1#c";
+      const electronShell = yield* ElectronShell.ElectronShell;
+
+      openExternalMock.mockResolvedValue(undefined);
+      assert.equal(yield* electronShell.openExternal(webUrl), true);
+
+      protocolAppMock.mockReturnValue("Linear");
+      assert.equal(yield* electronShell.openExternal(webUrl), true);
+
+      openExternalMock.mockRejectedValueOnce(new Error("no handler"));
+      assert.equal(yield* electronShell.openExternal(webUrl), true);
+
+      assert.deepEqual(openExternalMock.mock.calls, [[webUrl], [appUrl], [appUrl], [webUrl]]);
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  );
 
   it.effect("opens remote SSH editor URLs", () =>
     Effect.gen(function* () {
